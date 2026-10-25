@@ -1,0 +1,29 @@
+================ RINGKASAN ================
+[OK]    Tahap 1. Auth dan profil: 8 lulus, 0 gagal
+[OK]    Tahap 2. Dashboard awal: 5 lulus, 0 gagal
+[OK]    Tahap 3. Transaksi: 14 lulus, 0 gagal
+[OK]    Tahap 4. Budgeting: 11 lulus, 0 gagal
+[OK]    Tahap 5. Target tabung: 11 lulus, 0 gagal
+[OK]    Tahap 6. Kelola pinjaman: 29 lulus, 0 gagal
+[OK]    Tahap 7. Kalkulator bunga: 26 lulus, 0 gagal
+[OK]    Tahap 8. Financial Health: 8 lulus, 0 gagal
+[OK]    Tahap 9. Cari Aman: 7 lulus, 0 gagal
+[OK]    Tahap 10. Dashboard akhir: 10 lulus, 0 gagal
+[OK]    Tahap 11. Logout: 2 lulus, 0 gagal
+
+--- CATATAN ---
+- [7. Kalkulator bunga] A (kecil, 2%): masalah narasi AI -> status Mampu tapi menyarankan menunda
+- [7. Kalkulator bunga] A (kecil, 2%): isi narasi -> Pinjaman ini **masih sesuai dengan kemampuan keuanganmu**, dengan porsi cicilan yang naik dari 27% menjadi 30% dan sisa uang bulanan sebesar Rp1.261.667. Karena kamu sudah memiliki **4 pinjaman aktif**, tetaplah waspada agar tidak menambah beban utang baru yan
+- [7. Kalkulator bunga] B (sedang, 2% tenor 6): isi narasi -> Pinjaman ini masih **pas-pasan** dengan kondisi keuanganmu, dti naik dari 27% menjadi 33% dan kamu masih punya sisa ruang sekitar 1.16 jt setelah cicilan baru. Risiko rendah karena bunga 2% per bulan dan denda harian 1 000 yang masih wajar. Karena kamu sudah m
+- [7. Kalkulator bunga] C (besar, 5%): isi narasi -> Sayangnya, pinjaman ini **tidak sesuai dengan kemampuan keuanganmu** karena porsi cicilanmu melonjak dari 27% menjadi 103% dari pemasukan, sehingga kamu mengalami **kekurangan dana sebesar Rp950.000** setiap bulannya. Mengingat kamu sudah memiliki **4 pinjaman
+- [7. Kalkulator bunga] D (bunga "2.5", titik ribuan, tanpa deadline): isi narasi -> Pinjaman ini masih **pas-pasan** dengan kondisi keuanganmu, DTI naik dari 27% ke 36% dan sisa ruang masih sekitar 1.075 jt. Bunga 2.5% per bulan masuk kategori **sedang**, dan denda harian 2 000 (≈0.2% pokok) juga berada di level **sedang**, jadi **risiko seda
+- [7. Kalkulator bunga] Status "Tidak diketahui" tidak dites -> butuh akun tanpa pemasukan
+- [8. Financial Health] Skor Target Nabung -> 33/33, status Excellent
+- [8. Financial Health] Bug lama: persentase pilar Pinjaman berisi rasio cicilan, bukan persentase skor -> persentase 27, skor 33/33
+- [8. Financial Health] Saran Target Nabung tampak teks default -> cek key targetNabung vs targetTabungan antara prompt dan kode
+- [9. Cari Aman] Cari Aman AMAN -> level aman, skor 0
+- [9. Cari Aman] Cari Aman SEDANG -> level waspada, skor 54
+- [9. Cari Aman] Cari Aman BAHAYA -> level berbahaya, skor 100
+- [10. Dashboard akhir] Saldo di dashboard (masih dipakai sementara) -> 1780000 (harapan 1780000)
+
+Total: 131 lulus, 0 gagal dari 131 pengecekan.

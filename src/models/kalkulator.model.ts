@@ -6,7 +6,7 @@ export interface ISimulasiPinjaman {
   bungaPerBulan: number;
   tenorCicilan: number;
   dendaPerHari: number;
-  deadlineTarget: Date;
+  deadlineTarget?: Date;
   totalBunga: number;
   totalPembayaran: number;
   totalBayarPerBulan: number;
@@ -46,7 +46,7 @@ const SimulasiPinjamanSchema = new Schema<ISimulasiPinjaman>(
     },
     deadlineTarget: {
       type: Date,
-      required: true,
+      required: false,
     },
   
     totalBunga: {
