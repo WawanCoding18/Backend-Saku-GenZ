@@ -1,0 +1,2457 @@
+]633;E;for f in src/routes/api.ts src/controllers/*.controller.ts\x3b do   case "$f" in *chat.controller.ts) continue\x3b\x3b esac\x3b   echo "=== $f ==="\x3b   grep -vE '^\\s*(//.*)?$' "$f"\x3b done > kode-tes.txt;b18e5ce0-890a-43be-beee-dd54c2b2ce08]633;C=== src/routes/api.ts ===
+import express from "express";
+import authController from "../controllers/auth.controller";
+import authMiddleware from "../middlewares/auth.Middleware";
+import { createTransaksi, getAllTransaksi, getTransaksiById, updateTransaksi, deleteTransaksi} from "../controllers/transaksi.controller";
+import { upload } from "../middlewares/upload.Middleware"
+import { handleOcrUpload } from "../controllers/chat.controller";
+import { getProfile, postProfile, updateProfile } from "../controllers/profile.controller";
+import { postPinjaman, getAllPinjaman, putPinjaman, editPinjaman, deletePinjaman, perpanjangTempo, lunasiPinjaman } from "../controllers/pinjaman.controller";
+import { postKalkulatorBunga, getKalkulatorBunga } from "../controllers/kalkulator.controller"
+import { postBudgeting, getAllBudgeting, updateBudgeting, deleteBudgeting } from "../controllers/budgeting.controller";
+import { getCariAman, postCariAman } from "../controllers/cariAman.controller";
+import { getFinancialHealth, postFinancialHealth } from "../controllers/financialHealth.controller"
+import { getDashboard } from "../controllers/dashboard.controller";
+import { deleteTargetTabung, editTargetTabung, getAllTargetTabung, postTargetTabung, setorTargetTabung } from "../controllers/targetTabung.controller";
+const router = express.Router();
+router.post("/auth/register", authController.register);
+router.post("/auth/login", authController.login);
+router.get("/auth/me", authMiddleware ,authController.me);
+router.post("/auth/logout", authMiddleware, authController.logout);
+router.post("/auth/verify-otp", authController.verifyOTP);
+router.post("/auth/resend-otp", authController.resendOTP);
+router.post("/profile/onboarding", authMiddleware, postProfile);
+router.get("/profile", authMiddleware, getProfile);
+router.put("/profile", authMiddleware, updateProfile);
+router.post('/catatan-keuangan/scan', upload.single('image'), authMiddleware, handleOcrUpload);
+router.post("/catatan-keuangan/pinjaman/tambah-pinjaman", authMiddleware, postPinjaman);
+router.get("/catatan-keuangan/pinjaman", authMiddleware, getAllPinjaman);
+router.put("/catatan-keuangan/pinjaman/:id/bayar", authMiddleware, putPinjaman);
+router.put("/catatan-keuangan/pinjaman/:id", authMiddleware, editPinjaman);
+router.put("/catatan-keuangan/pinjaman/:id/lunasi", authMiddleware, lunasiPinjaman);
+router.put("/catatan-keuangan/pinjaman/:id/perpanjang", authMiddleware, perpanjangTempo);
+router.delete("/catatan-keuangan/pinjaman/:id", authMiddleware, deletePinjaman);
+router.post("/catatan-keuangan/target-tabung/tambah-target", authMiddleware, postTargetTabung);
+router.get("/catatan-keuangan/target-tabung", authMiddleware, getAllTargetTabung);
+router.put("/catatan-keuangan/target-tabung/:id/setor", authMiddleware, setorTargetTabung);
+router.put("/catatan-keuangan/target-tabung/:id", authMiddleware, editTargetTabung);
+router.delete("/catatan-keuangan/target-tabung/:id", authMiddleware, deleteTargetTabung);
+router.post("/catatan-keuangan/budgeting/tambah-budget", authMiddleware, postBudgeting);
+router.get("/catatan-keuangan/budgeting", authMiddleware, getAllBudgeting);
+router.put("/catatan-keuangan/budgeting/:id", authMiddleware, updateBudgeting);
+router.delete("/catatan-keuangan/budgeting/:id", authMiddleware, deleteBudgeting);
+router.post("/catatan-keuangan/transaksi", authMiddleware, createTransaksi);
+router.get("/catatan-keuangan", authMiddleware, getAllTransaksi);
+router.get("/catatan-keuangan/:id", authMiddleware, getTransaksiById);
+router.put("/catatan-keuangan/:id", authMiddleware, updateTransaksi);
+router.delete("/catatan-keuangan/:id", authMiddleware, deleteTransaksi);
+router.post('/kalkulator-bunga', authMiddleware, postKalkulatorBunga);
+router.get("/kalkulator-bunga/output", authMiddleware, getKalkulatorBunga); 
+router.post("/cariAman", authMiddleware, postCariAman);
+router.get("/cariAman/output", authMiddleware, getCariAman);
+router.post("/financial-health/output", authMiddleware, postFinancialHealth);
+router.get("/dashboard/financial-health", authMiddleware, getFinancialHealth);
+router.get("/dashboard", authMiddleware, getDashboard);
+export default router;
+=== src/controllers/auth.controller.ts ===
+import { Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import * as Yup from "yup";
+import UserModel from "../models/user.model";
+import BlacklistTokenModel from "../models/blacklistToken.model";
+import { encrypt } from "../utils/Encryption";
+import { generateToken } from "../utils/jwt";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import connect from "../utils/database";
+import { sendOTPEmail, generateOTP } from "../utils/mail/mail";
+type TyRegister = {
+  fullName: string;
+  username: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+};
+type TyLogin = {
+  identifier: string;
+  password: string;
+};
+const registerSchema = Yup.object({
+  fullName: Yup.string().required(),
+  username: Yup.string().required(),
+  email: Yup.string().email().required(),
+  password: Yup.string()
+    .min(6, "Password must be at least 6 characters")
+    .test(
+      "at-least-one-uppercase-letter",
+      "Password must contain at least one uppercase letter",
+      (value) => {
+        if (!value) return false;
+        return /^(?=.*[A-Z])/.test(value);
+      },
+    )
+    .test(
+      "at-least-one-number",
+      "Password must contain at least one number",
+      (value) => {
+        if (!value) return false;
+        return /^(?=.*\d)/.test(value);
+      },
+    )
+    .required(),
+  confirmPassword: Yup.string()
+    .oneOf([Yup.ref("password"), ""], "Passwords must match")
+    .required(),
+});
+export default {
+  async register(req: Request, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.requestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+          }
+        }
+      }
+    */
+    try {
+      await connect();
+      const body = req.body as unknown as TyRegister;
+      if (!body || Object.keys(body).length === 0) {
+        return res.status(400).json({
+          message: "Request body is missing",
+          error: "Please send registration data",
+          data: null,
+        });
+      }
+      const fullName = body.fullName?.trim();
+      const username = body.username?.trim();
+      const email = body.email?.trim();
+      const password = body.password?.trim();
+      const confirmPassword = body.confirmPassword?.trim();
+      await registerSchema.validate({
+        fullName,
+        username,
+        email,
+        password,
+        confirmPassword,
+      });
+      const existingUser = await UserModel.findOne({
+        $or: [{ email }, { username }],
+      });
+      if (existingUser) {
+        if (!existingUser.isActive) {
+          const otpCode = generateOTP();
+          const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+          await UserModel.findByIdAndUpdate(existingUser._id, {
+            otpCode,
+            otpExpiresAt,
+            password,
+          });
+          await sendOTPEmail(email, fullName, otpCode);
+          return res.status(200).json({
+            message:
+              "Registration successful. Please check your email for the new OTP code.",
+            data: { email },
+          });
+        }
+        return res.status(400).json({
+          message: "Email or username already registered",
+          error: "Please use a different email or username",
+          data: null,
+        });
+      }
+      const otpCode = generateOTP();
+      const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      await UserModel.create({
+        fullName,
+        username,
+        email,
+        password,
+        otpCode,
+        otpExpiresAt,
+        isActive: false,
+      });
+      await sendOTPEmail(email, fullName, otpCode);
+      res.status(200).json({
+        message:
+          "Registration successful. Please check your email for OTP code.",
+        data: { email },
+      });
+    } catch (error) {
+      const err = error as Error;
+      res.status(400).json({
+        message: "Registration failed",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+  async verifyOTP(req: Request, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.requestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/VerifyOTPRequest" }
+          }
+        }
+      }
+    */
+    try {
+      await connect();
+      const { email, otpCode } = req.body as { email: string; otpCode: string };
+      if (!email || !otpCode) {
+        return res.status(400).json({
+          message: "Email and OTP code are required",
+          data: null,
+        });
+      }
+      const user = await UserModel.findOne({ email });
+      if (!user) {
+        return res.status(404).json({
+          message: "User not found",
+          data: null,
+        });
+      }
+      if (user.isActive) {
+        return res.status(400).json({
+          message: "Account already activated",
+          data: null,
+        });
+      }
+      if (!user.otpExpiresAt || new Date() > user.otpExpiresAt) {
+        return res.status(400).json({
+          message: "OTP has expired. Please request a new one.",
+          data: null,
+        });
+      }
+      if (user.otpCode !== otpCode) {
+        return res.status(400).json({
+          message: "Invalid OTP code",
+          data: null,
+        });
+      }
+      const updatedUser = await UserModel.findByIdAndUpdate(
+        user._id,
+        {
+          isActive: true,
+          otpCode: null,
+          otpExpiresAt: null,
+        },
+        { new: true },
+      );
+      const token = generateToken({
+        id: updatedUser!._id,
+        role: updatedUser!.role,
+        otpCode: updatedUser!.otpCode,
+        otpExpiresAt: updatedUser!.otpExpiresAt,
+      });
+      res.status(200).json({
+        message: "Account activated successfully!",
+        data: token,
+      });
+    } catch (error) {
+      const err = error as Error;
+      res.status(400).json({
+        message: "OTP verification failed",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+  async resendOTP(req: Request, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.requestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ResendOTPRequest" }
+          }
+        }
+      }
+    */
+    try {
+      await connect();
+      const { email } = req.body as { email: string };
+      if (!email) {
+        return res.status(400).json({
+          message: "Email is required",
+          data: null,
+        });
+      }
+      const user = await UserModel.findOne({ email, isActive: false });
+      if (!user) {
+        return res.status(404).json({
+          message: "User not found or already activated",
+          data: null,
+        });
+      }
+      const otpCode = generateOTP();
+      const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      await UserModel.findByIdAndUpdate(user._id, {
+        otpCode,
+        otpExpiresAt,
+      });
+      await sendOTPEmail(email, user.fullName, otpCode);
+      res.status(200).json({
+        message: "New OTP sent to your email",
+        data: null,
+      });
+    } catch (error) {
+      const err = error as Error;
+      res.status(400).json({
+        message: "Failed to resend OTP",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+  async login(req: Request, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.requestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+          }
+        }
+      }
+    */
+    try {
+      await connect();
+      const rawBody = req.body as unknown as TyLogin;
+      const identifier = rawBody.identifier?.trim();
+      const password = rawBody.password?.trim();
+      if (!identifier || !password) {
+        return res.status(400).json({
+          message: "Identifier and password are required",
+          data: null,
+        });
+      }
+      const user = await UserModel.findOne({
+        $or: [{ username: identifier }, { email: identifier }],
+      });
+      if (!user) {
+        return res.status(403).json({
+          message: "User not found",
+          data: null,
+        });
+      }
+      if (!user.isActive) {
+        return res.status(403).json({
+          message: "Account not activated. Please verify your OTP first.",
+          data: null,
+        });
+      }
+      const validPassword: boolean = encrypt(password) === user.password;
+      if (!validPassword) {
+        return res.status(403).json({
+          message: "Wrong password",
+          data: null,
+        });
+      }
+      const token = generateToken({
+        id: user._id,
+        role: user.role,
+        otpCode: user.otpCode,
+        otpExpiresAt: user.otpExpiresAt,
+      });
+      res.status(200).json({
+        message: "Login successful",
+        data: token,
+      });
+    } catch (error) {
+      const err = error as Error;
+      res.status(400).json({
+        message: "Login failed",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+  async logout(req: IReqUser, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.security = [{ bearerAuth: [] }]
+    */
+    try {
+      await connect();
+      const authorization = req.headers?.authorization;
+      const accessToken = authorization?.split(" ")[1];
+      if (!accessToken) {
+        return res.status(400).json({
+          message: "Token tidak ditemukan",
+          data: null,
+        });
+      }
+      const decoded = jwt.decode(accessToken) as { exp?: number } | null;
+      const expiresAt = decoded?.exp
+        ? new Date(decoded.exp * 1000)
+        : new Date(Date.now() + 60 * 60 * 1000); //1 jam kalau exp gak ada
+      await BlacklistTokenModel.create({ token: accessToken, expiresAt });
+      return res.status(200).json({
+        message: "Logout successful",
+        data: null,
+      });
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) {
+        return res.status(200).json({
+          message: "Logout successful",
+          data: null,
+        });
+      }
+      const err = error as Error;
+      res.status(400).json({
+        message: "Logout failed",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+  async me(req: IReqUser, res: Response) {
+    /*
+      #swagger.tags = ['Auth']
+      #swagger.security = [{ bearerAuth: [] }]
+    */
+    try {
+      await connect();
+      const user = req.user;
+      const result = await UserModel.findById(user?.id);
+      res.status(200).json({
+        message: "Success get user profile",
+        data: result,
+      });
+    } catch (error) {
+      const err = error as Error;
+      res.status(400).json({
+        message: "Failed to get user profile",
+        error: err.message,
+        data: null,
+      });
+    }
+  },
+};
+=== src/controllers/budgeting.controller.ts ===
+import { Request, Response } from "express";
+import BudgetingModel from "../models/budgeting.model";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import TransaksiModel from "../models/transaksi.model";
+export const postBudgeting = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const { Kategori_Budget, Batas_PerBulan, Tanggal_Mulai, Tanggal_Selesai } =
+      req.body;
+    const batas = Number(Batas_PerBulan);
+    const mulai = new Date(Tanggal_Mulai);
+    const selesai = new Date(Tanggal_Selesai);
+    if (!Kategori_Budget) {
+      return res.status(400).json({ message: "Kategori Budget wajib dipilih" });
+    }
+    if (!batas || batas <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Batas per Bulan harus lebih dari 0" });
+    }
+    if (isNaN(mulai.getTime()) || isNaN(selesai.getTime())) {
+      return res
+        .status(400)
+        .json({ message: "Tanggal Mulai / Tanggal Selesai tidak valid" });
+    }
+    if (selesai <= mulai) {
+      return res
+        .status(400)
+        .json({ message: "Tanggal Selesai harus setelah Tanggal Mulai" });
+    }
+    const budgetBentrok = await BudgetingModel.findOne({
+      user: userId,
+      Kategori_Budget,
+      Tanggal_Mulai: { $lte: selesai },
+      Tanggal_Selesai: { $gte: mulai },
+    });
+    if (budgetBentrok) {
+      return res.status(400).json({
+        message: `Budget untuk kategori "${Kategori_Budget}" pada periode ini sudah ada`,
+      });
+    }
+    const newBudgeting = await BudgetingModel.create({
+      user: userId,
+      Kategori_Budget,
+      Batas_PerBulan: batas,
+      Tanggal_Mulai: mulai,
+      Tanggal_Selesai: selesai,
+    });
+    return res.status(201).json({
+      message: "Berhasil menambahkan budget",
+      data: newBudgeting,
+    });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal membuat budget", error: String(error) });
+  }
+};
+export const getAllBudgeting = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const listBudgeting = await BudgetingModel.find({ user: userId }).sort({
+      createdAt: -1,
+    });
+    const formattedData = await Promise.all(
+      listBudgeting.map(async (budget: any) => {
+        const transaksiDalamPeriode = await TransaksiModel.find({
+          user: userId,
+          kategori: budget.Kategori_Budget,
+          tipe: "pengeluaran",
+          tanggal: {
+            $gte: budget.Tanggal_Mulai,
+            $lte: budget.Tanggal_Selesai,
+          },
+        });
+        const terpakai = transaksiDalamPeriode.reduce(
+          (acc, t) => acc + (t.nominal ?? 0),
+          0,
+        );
+        const tersisa = Math.max(0, budget.Batas_PerBulan - terpakai);
+        const persentase =
+          budget.Batas_PerBulan > 0
+            ? Number(((terpakai / budget.Batas_PerBulan) * 100).toFixed(0))
+            : 0;
+        const today = new Date();
+        const selesai = new Date(budget.Tanggal_Selesai);
+        const selisihMs = selesai.getTime() - today.getTime();
+        const sisaHari = Math.max(
+          0,
+          Math.ceil(selisihMs / (1000 * 60 * 60 * 24)),
+        );
+        let statusLabel = "Batas Aman";
+        if (persentase >= 100) {
+          statusLabel = "Melebihi Budget";
+        } else if (persentase >= 70) {
+          statusLabel = "Mendekati Batas";
+        }
+        return {
+          _id: budget._id,
+          Kategori_Budget: budget.Kategori_Budget,
+          Batas_PerBulan: budget.Batas_PerBulan,
+          Tanggal_Mulai: budget.Tanggal_Mulai,
+          Tanggal_Selesai: budget.Tanggal_Selesai,
+          terpakai,
+          tersisa,
+          persentase,
+          sisaHari,
+          statusLabel,
+        };
+      }),
+    );
+    const totalBudget = formattedData.reduce((acc, item) => {
+      return acc + (item.Batas_PerBulan ?? 0);
+    }, 0);
+    const totalPengeluaran = formattedData.reduce((acc, item) => {
+      return acc + (item.terpakai ?? 0);
+    }, 0);
+    const sisaBudget = Math.max(0, totalBudget - totalPengeluaran);
+    return res.status(200).json({
+      message: "Berhasil mengambil data budgeting",
+      summary: {
+        totalBudget,
+        totalPengeluaran,
+        sisaBudget,
+      },
+      data: formattedData,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal mengambil data budgeting",
+        error: String(error),
+      });
+  }
+};
+export const updateBudgeting = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const budget = await BudgetingModel.findOne({ _id: id, user: userId });
+    if (!budget) {
+      return res.status(404).json({ message: "Budget tidak ditemukan" });
+    }
+    const budgetAny: any = budget;
+    const { Kategori_Budget, Batas_PerBulan, Tanggal_Mulai, Tanggal_Selesai } =
+      req.body || {};
+    const kategoriBaru = Kategori_Budget ?? budgetAny.Kategori_Budget;
+    const batasBaru =
+      Batas_PerBulan !== undefined
+        ? Number(Batas_PerBulan)
+        : budgetAny.Batas_PerBulan;
+    const mulaiBaru = Tanggal_Mulai
+      ? new Date(Tanggal_Mulai)
+      : budgetAny.Tanggal_Mulai;
+    const selesaiBaru = Tanggal_Selesai
+      ? new Date(Tanggal_Selesai)
+      : budgetAny.Tanggal_Selesai;
+    if (!batasBaru || batasBaru <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Batas per Bulan harus lebih dari 0" });
+    }
+    if (isNaN(mulaiBaru.getTime()) || isNaN(selesaiBaru.getTime())) {
+      return res
+        .status(400)
+        .json({ message: "Tanggal Mulai / Tanggal Selesai tidak valid" });
+    }
+    if (selesaiBaru <= mulaiBaru) {
+      return res
+        .status(400)
+        .json({ message: "Tanggal Selesai harus setelah Tanggal Mulai" });
+    }
+    const budgetBentrok = await BudgetingModel.findOne({
+      _id: { $ne: id },
+      user: userId,
+      Kategori_Budget: kategoriBaru,
+      Tanggal_Mulai: { $lte: selesaiBaru },
+      Tanggal_Selesai: { $gte: mulaiBaru },
+    });
+    if (budgetBentrok) {
+      return res.status(400).json({
+        message: `Budget untuk kategori "${kategoriBaru}" pada periode ini sudah ada`,
+      });
+    }
+    budgetAny.Kategori_Budget = kategoriBaru;
+    budgetAny.Batas_PerBulan = batasBaru;
+    budgetAny.Tanggal_Mulai = mulaiBaru;
+    budgetAny.Tanggal_Selesai = selesaiBaru;
+    await budgetAny.save();
+    return res.status(200).json({
+      message: "Berhasil memperbarui budget",
+      data: budgetAny,
+    });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal update budget", error: String(error) });
+  }
+};
+export const deleteBudgeting = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const deletedBudget = await BudgetingModel.findOneAndDelete({
+      _id: id,
+      user: userId,
+    });
+    if (!deletedBudget) {
+      return res
+        .status(404)
+        .json({ message: "Budget tidak ditemukan atau bukan milik Anda" });
+    }
+    return res.status(200).json({
+      message: "Berhasil menghapus budget",
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal menghapus budget", error: String(error) });
+  }
+};
+export const cekBudgetWarning = async (userId: string) => {
+  const listBudgeting = await BudgetingModel.find({ user: userId });
+  const warnings = [];
+  for (const budget of listBudgeting) {
+    const transaksiDalamPeriode = await TransaksiModel.find({
+      user: userId,
+      kategori: budget.Kategori_Budget,
+      tipe: "pengeluaran",
+      tanggal: { $gte: budget.Tanggal_Mulai, $lte: budget.Tanggal_Selesai },
+    });
+    const terpakai = transaksiDalamPeriode.reduce(
+      (acc, t) => acc + (t.nominal ?? 0),
+      0,
+    );
+    const persentase =
+      budget.Batas_PerBulan > 0
+        ? Math.round((terpakai / budget.Batas_PerBulan) * 100)
+        : 0;
+    if (persentase >= 80) {
+      warnings.push({
+        kategori: budget.Kategori_Budget,
+        persentase,
+        pesan: `${persentase}% budget terpakai! Saatnya kamu menghemat agar target tabungan tetap tercapai dan cicilan bisa dibayar tepat waktu.`,
+      });
+    }
+  }
+  return warnings;
+};
+=== src/controllers/cariAman.controller.ts ===
+import { Response } from "express";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import { askAIStream } from "../services/aiCariAman.services";
+import { checkOjkLegality } from "../services/ojk.services";
+import connect from "../utils/database";
+import CariAmanModel from "../models/cariAman.model";
+import mongoose from "mongoose";
+const autoSaveCariAman = async (
+  userId: string | mongoose.Types.ObjectId | undefined,
+  result: any
+) => {
+  console.log("🔍 [DEBUG CARI AMAN SAVE] Checking params:", {
+    userId,
+    hasResult: !!result,
+  });
+  const rawUserId =
+    userId instanceof mongoose.Types.ObjectId
+      ? userId
+      : userId || "66b123456789012345678901";
+  const targetUserId =
+    rawUserId instanceof mongoose.Types.ObjectId
+      ? rawUserId
+      : new mongoose.Types.ObjectId(rawUserId);
+  if (!result) {
+    console.warn(
+      "⚠️ [CARI AMAN SAVE SKIPPED] Function askAIStream tidak mengembalikan return object result."
+    );
+    return null;
+  }
+  const rawRiskLevel = (result.risk_level || result.riskLevel || "").toLowerCase();
+  let validRiskLevel: "aman" | "waspada" | "berbahaya" = "waspada";
+  if (rawRiskLevel.includes("aman") || rawRiskLevel.includes("rendah")) {
+    validRiskLevel = "aman";
+  } else if (rawRiskLevel.includes("bahaya") || rawRiskLevel.includes("tinggi")) {
+    validRiskLevel = "berbahaya";
+  } else {
+    validRiskLevel = "waspada";
+  }
+  const rawOjkLegal = result.is_ojk_legal || result.isOjkLegal;
+  const validOjkLegal: "Terdaftar Resmi" | "Tidak Ditemukan" =
+    rawOjkLegal === "Terdaftar Resmi" || rawOjkLegal === true
+      ? "Terdaftar Resmi"
+      : "Tidak Ditemukan";
+  try {
+    const savedEntry = await CariAmanModel.create({
+      userId: targetUserId,
+      riskScore: result.risk_score ?? result.riskScore ?? 0,
+      riskLevel: validRiskLevel,
+      isScamIndicated: Boolean(result.is_scam_indicated ?? result.isScamIndicated),
+      isOjkLegal: validOjkLegal,
+      interestWarning: Boolean(result.interest_warning ?? result.interestWarning),
+      manipulativeLanguageDetected: Boolean(
+        result.manipulative_language_detected ?? result.manipulativeLanguageDetected
+      ),
+      sensitiveDataRequested: Boolean(
+        result.sensitive_data_requested ?? result.sensitiveDataRequested
+      ),
+      socengIndicated: Boolean(result.soceng_indicated ?? result.socengIndicated),
+      apkDownloadIndicated: Boolean(
+        result.apk_download_indicated ?? result.apkDownloadIndicated
+      ),
+      channelViolationDetected: Boolean(
+        result.channel_violation_detected ?? result.channelViolationDetected
+      ),
+      aiSummary: result.ai_summary || result.aiSummary || "Tidak ada ringkasan",
+      aiDetail: result.ai_detail || result.aiDetail || "Tidak ada detail analisis",
+      aiRecommendation:
+        result.ai_recommendation || result.aiRecommendation || "Tidak ada rekomendasi",
+    });
+    console.log(
+      `✅ [CARI AMAN SAVE SUCCESS] Berhasil simpan ke DB! ID: ${savedEntry._id} | Risk: ${validRiskLevel}`
+    );
+    console.log("=================== 📍 LOKASI PENYIMPANAN DB ===================");
+    console.log("🌐 Host Mongo :", CariAmanModel.db.host);
+    console.log("📁 Nama DB   :", CariAmanModel.db.name);
+    console.log("📂 Collection:", CariAmanModel.collection.name);
+    console.log("🆔 Document ID:", savedEntry._id);
+    console.log("================================================================");
+    return savedEntry;
+  } catch (err) {
+    console.error("❌ [CARI AMAN SAVE ERROR] Gagal menyimpan ke MongoDB:", err);
+    return null;
+  }
+};
+export const postCariAman = async (req: IReqUser, res: Response) => {
+  const userId = req.user?.id;
+  const { message } = req.body;
+  if (!message || typeof message !== "string" || message.trim().length === 0) {
+    return res.status(400).json({ error: "Message tidak boleh kosong" });
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  try {
+    await connect();
+    const ojkResult = await checkOjkLegality(message);
+    const result = await askAIStream(
+      message,
+      ojkResult.is_ojk_legal ? "Terdaftar Resmi" : "Tidak Ditemukan",
+      res
+    );
+    const savedEntry = await autoSaveCariAman(userId, result);
+    res.write(
+      `data: ${JSON.stringify({ type: "done", result: savedEntry || result })}\n\n`
+    );
+  } catch (error: any) {
+    console.error("❌ Error pada postCariAman:", error.message);
+    res.write(
+      `data: ${JSON.stringify({
+        type: "error",
+        text: "Gagal menganalisis pesan, silakan coba lagi",
+        error: String(error.message || error),
+      })}\n\n`
+    );
+  } finally {
+    res.end();
+  }
+};
+export const getCariAman = async (req: IReqUser, res: Response) => {
+  try {
+    const rawUserId = req.user?.id || "66b123456789012345678901";
+    const targetUserId = new mongoose.Types.ObjectId(rawUserId);
+    await connect();
+    const latestData = await CariAmanModel.findOne({ userId: targetUserId })
+      .select(
+        "riskScore riskLevel isScamIndicated isOjkLegal interestWarning manipulativeLanguageDetected sensitiveDataRequested socengIndicated apkDownloadIndicated channelViolationDetected aiSummary aiDetail aiRecommendation createdAt"
+      )
+      .sort({ createdAt: -1 });
+    if (!latestData) {
+      return res.status(200).json({
+        message: "Belum ada data analisis",
+        data: null,
+      });
+    }
+    return res.status(200).json({
+      message: "Berhasil mengambil data analisis terbaru",
+      data: latestData,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Gagal mengambil data",
+      error: String(error),
+    });
+  }
+};
+=== src/controllers/dashboard.controller.ts ===
+import { Response } from "express";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import { hitungDataTransaksi } from "./transaksi.controller";
+import { hitungDataPinjaman } from "./pinjaman.controller";
+import { hitungDanSimpanFinancialHealth } from "./financialHealth.controller";
+import { cekBudgetWarning } from "./budgeting.controller";
+import UserModel from "../models/user.model";
+import FinancialHealthModel from "../models/financialHealth.model";
+import TargetTabungModel from "../models/targetTabung.model";
+export const getDashboard = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const id = userId.toString();
+    const [
+      user,
+      transaksiData,
+      fhTersimpan,
+      pinjamanData,
+      budgetWarnings,
+      targetAktif,
+    ] = await Promise.all([
+      UserModel.findById(id).select("username").lean(),
+      hitungDataTransaksi(id),
+      FinancialHealthModel.findOne({ user: id })
+        .select("skorTotal grade updatedAt")
+        .lean(),
+      hitungDataPinjaman(id),
+      cekBudgetWarning(id),
+      TargetTabungModel.find({ user: id, status: "Aktif" })
+        .sort({ deadlineTarget: 1 })
+        .limit(1)
+        .lean(),
+    ]);
+    const fh: any = fhTersimpan ?? (await hitungDanSimpanFinancialHealth(id));
+    const transaksiTerakhir = transaksiData.data.slice(0, 5).map((t: any) => ({
+      _id: t._id,
+      catatan: t.Catatan_Transaksi,
+      kategori: t.kategori,
+      tipe: t.tipe,
+      nominal: t.nominal,
+      tanggal: t.tanggal,
+    }));
+    const cicilanMendatang = pinjamanData.data
+      .filter((p) => p.statusPinjaman !== "Lunas")
+      .sort(
+        (a, b) =>
+          new Date(a.jatuhTempo).getTime() - new Date(b.jatuhTempo).getTime(),
+      )
+      .slice(0, 2)
+      .map((p) => ({
+        _id: p._id,
+        namaPlatform: p.namaPlatform,
+        jatuhTempo: p.jatuhTempo,
+        cicilanBulanan: p.cicilanBulanan,
+      }));
+    const targetNabung = targetAktif.map((t: any) => ({
+      _id: t._id,
+      icon: t.icon,
+      namaTarget: t.namaTarget,
+      targetNominal: t.targetNominal,
+      terkumpulNominal: t.terkumpulNominal,
+      persentase:
+        t.targetNominal > 0
+          ? Math.min(
+              100,
+              Math.round((t.terkumpulNominal / t.targetNominal) * 100),
+            )
+          : 0,
+    }));
+    return res.status(200).json({
+      message: "Dashboard data berhasil diambil",
+      data: {
+        nama: user?.username,
+        notifikasi: budgetWarnings,
+        ringkasan: {
+          saldo: transaksiData.summary.saldo, // hapus jika saldo dibuang
+          totalPemasukan: transaksiData.summary.totalPemasukan,
+          totalPengeluaran: transaksiData.summary.totalPengeluaran,
+        },
+        financialHealth: {
+          skorTotal: fh.skorTotal,
+          grade: fh.grade,
+          updatedAt: fh.updatedAt,
+        },
+        transaksiTerakhir,
+        cicilanMendatang,
+        pinjamanAktif: {
+          jumlahAktif: pinjamanData.jumlahAktif,
+          peringatan: pinjamanData.peringatan,
+        },
+        targetNabung,
+      },
+    });
+  } catch (error: any) {
+    console.error("❌ Gagal mengambil data dashboard:", error.message);
+    return res.status(500).json({
+      message: "Gagal mengambil data dashboard",
+      error: error.message,
+    });
+  }
+};
+=== src/controllers/financialHealth.controller.ts ===
+import { Response } from "express";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import FinancialHealthModel from "../models/financialHealth.model";
+import BudgetingModel from "../models/budgeting.model";
+import PinjamanModel from "../models/pinjaman.model";
+import TargetTabungModel from "../models/targetTabung.model";
+import TransaksiModel from "../models/transaksi.model";
+import { askAIStream } from "../services/ai.FinancialHealth.services";
+interface IAIResult {
+  disiplinAnggaran?: {
+    ringkasan?: string;
+    saranPerkembangan?: string[];
+  };
+  pengelolaanPinjaman?: {
+    ringkasan?: string;
+    saranPerkembangan?: string[];
+  };
+  targetNabung?: {
+    ringkasan?: string;
+    saranPerkembangan?: string[];
+  };
+}
+const hitungDisiplinAnggaran = async (userId: string) => {
+  const listBudgeting = await BudgetingModel.find({ user: userId });
+  if (listBudgeting.length === 0) {
+    return {
+      skor: 0,
+      maksimal: 34,
+      persentase: 0,
+      status: "Perlu Perhatian" as const,
+      ringkasan:
+        "Kamu belum membuat budget apapun. Buat budget untuk mulai melacak pengeluaranmu.",
+    };
+  }
+  let kategoriDalamBatas = 0;
+  for (const budget of listBudgeting) {
+    const transaksiDalamPeriode = await TransaksiModel.find({
+      user: userId,
+      kategori: budget.Kategori_Budget,
+      tipe: "pengeluaran",
+      tanggal: { $gte: budget.Tanggal_Mulai, $lte: budget.Tanggal_Selesai },
+    });
+    const terpakai = transaksiDalamPeriode.reduce(
+      (acc, t) => acc + (t.nominal ?? 0),
+      0,
+    );
+    if (terpakai <= budget.Batas_PerBulan) {
+      kategoriDalamBatas++;
+    }
+  }
+  const totalKategori = listBudgeting.length;
+  const rasio = kategoriDalamBatas / totalKategori;
+  const skor = Math.round(rasio * 34);
+  let status: "Excellent" | "Good" | "Perlu Perhatian" | "Buruk";
+  if (rasio >= 0.9) status = "Excellent";
+  else if (rasio >= 0.7) status = "Good";
+  else if (rasio >= 0.4) status = "Perlu Perhatian";
+  else status = "Buruk";
+  const ringkasan =
+    kategoriDalamBatas === totalKategori
+      ? "Semua pengeluaran bulan ini masih sesuai dengan batas anggaran yang kamu buat. Mantap, berarti kamu cukup disiplin dalam mengatur pengeluaran."
+      : `Ada ${
+          totalKategori - kategoriDalamBatas
+        } dari ${totalKategori} kategori budget yang sudah melebihi batas. Coba lebih perhatikan pengeluaran di kategori tersebut.`;
+  return {
+    skor,
+    maksimal: 34,
+    persentase: Math.round(rasio * 100),
+    status,
+    ringkasan,
+  };
+};
+const hitungPengelolaanPinjaman = async (userId: string) => {
+  const listPinjaman = await PinjamanModel.find({ user: userId });
+  const tigaPuluhHariLalu = new Date();
+  tigaPuluhHariLalu.setDate(tigaPuluhHariLalu.getDate() - 30);
+  const transaksiPemasukan = await TransaksiModel.find({
+    user: userId,
+    tipe: "pemasukan",
+    tanggal: { $gte: tigaPuluhHariLalu },
+  });
+  const totalPemasukan = transaksiPemasukan.reduce(
+    (acc, t) => acc + (t.nominal ?? 0),
+    0,
+  );
+  if (listPinjaman.length === 0) {
+    return {
+      skor: 33,
+      maksimal: 33,
+      persentase: 0,
+      status: "Excellent" as const,
+      ringkasan:
+        "Kamu tidak memiliki pinjaman aktif saat ini. Kondisi ini sangat baik untuk kesehatan keuanganmu.",
+    };
+  }
+  const kewajibanPerbulan = listPinjaman.reduce((acc, item) => {
+    if (item.statusPinjaman !== "Lunas")
+      return acc + (item.cicilanBulanan ?? 0);
+    return acc;
+  }, 0);
+  const rasioDTI = totalPemasukan > 0 ? kewajibanPerbulan / totalPemasukan : 1;
+  let skor: number;
+  let status: "Excellent" | "Good" | "Perlu Perhatian" | "Buruk";
+  if (rasioDTI <= 0.3) {
+    skor = 33;
+    status = "Excellent";
+  } else if (rasioDTI <= 0.5) {
+    skor = 23;
+    status = "Good";
+  } else if (rasioDTI <= 0.7) {
+    skor = 13;
+    status = "Perlu Perhatian";
+  } else {
+    skor = 3;
+    status = "Buruk";
+  }
+  const persentase = Math.round(rasioDTI * 100);
+  const ringkasan = `Sekitar ${persentase}% pemasukanmu masih digunakan untuk membayar cicilan. ${
+    rasioDTI <= 0.3
+      ? "Kondisi ini sangat aman."
+      : rasioDTI <= 0.5
+        ? "Masih aman, tapi usahakan jangan bertambah supaya keuangan tetap sehat."
+        : "Ini sudah cukup berat, sebaiknya prioritaskan pelunasan cicilan sebelum ambil pinjaman baru."
+  }`;
+  return { skor, maksimal: 33, persentase, status, ringkasan };
+};
+const hitungTargetNabung = async (userId: string) => {
+  const listTarget = await TargetTabungModel.find({ user: userId });
+  if (listTarget.length === 0) {
+    return {
+      skor: 17,
+      maksimal: 33,
+      persentase: 0,
+      status: "Perlu Perhatian" as const,
+      ringkasan:
+        "Kamu belum membuat target tabungan apapun. Mulai buat target untuk melatih kebiasaan menabung.",
+    };
+  }
+  const sekarang = new Date();
+  let totalRasioPencapaian = 0;
+  let jumlahTargetValid = 0;
+  let adaYangGagal = false;
+  for (const target of listTarget) {
+    if (target.status === "Gagal") {
+      totalRasioPencapaian += 0;
+      jumlahTargetValid++;
+      adaYangGagal = true;
+      continue;
+    }
+    if (target.status === "Tercapai") {
+      totalRasioPencapaian += 1;
+      jumlahTargetValid++;
+      continue;
+    }
+    const tanggalMulai = (target as any).createdAt
+      ? new Date((target as any).createdAt)
+      : sekarang;
+    const deadline = new Date(target.deadlineTarget);
+    const totalDurasiMs = deadline.getTime() - tanggalMulai.getTime();
+    const waktuBerjalanMs = sekarang.getTime() - tanggalMulai.getTime();
+    if (totalDurasiMs <= 0) continue; //data tidak valid skip
+    const progresDiharapkan = Math.min(
+      1,
+      Math.max(0, waktuBerjalanMs / totalDurasiMs),
+    );
+    const progresAktual =
+      target.targetNominal > 0
+        ? target.terkumpulNominal / target.targetNominal
+        : 0;
+    const rasioPencapaian =
+      progresDiharapkan > 0
+        ? Math.min(1, progresAktual / progresDiharapkan)
+        : 1;
+    totalRasioPencapaian += rasioPencapaian;
+    jumlahTargetValid++;
+  }
+  if (jumlahTargetValid === 0) {
+    return {
+      skor: 17,
+      maksimal: 33,
+      persentase: 0,
+      status: "Perlu Perhatian" as const,
+      ringkasan:
+        "Data target tabunganmu belum lengkap, sehingga belum dapat dihitung progresnya.",
+    };
+  }
+  const rataRataRasio = totalRasioPencapaian / jumlahTargetValid;
+  const persentase = Math.round(rataRataRasio * 100);
+  let skor: number;
+  let status: "Excellent" | "Good" | "Perlu Perhatian" | "Buruk";
+  if (rataRataRasio >= 0.9) {
+    skor = 33;
+    status = "Excellent";
+  } else if (rataRataRasio >= 0.7) {
+    skor = 23 + Math.round((rataRataRasio - 0.7) * 45);
+    status = "Good";
+  } else if (rataRataRasio >= 0.5) {
+    skor = 13 + Math.round((rataRataRasio - 0.5) * 45);
+    status = "Perlu Perhatian";
+  } else {
+    skor = Math.max(0, Math.round(rataRataRasio * 26));
+    status = "Buruk";
+  }
+  const catatanGagal = adaYangGagal
+    ? " Ada target yang gagal tercapai, ini menurunkan skor keseluruhan."
+    : "";
+  const ringkasan =
+    rataRataRasio >= 0.9
+      ? `Progres menabungmu sangat baik, rata-rata sudah **${persentase}%** sesuai target waktu yang direncanakan.${catatanGagal}`
+      : rataRataRasio >= 0.5
+        ? `Progres tabunganmu saat ini sekitar **${persentase}%** dari yang diharapkan sesuai jadwal. Masih bisa dikejar.${catatanGagal}`
+        : `Progres tabunganmu baru **${persentase}%** dari target yang seharusnya sudah tercapai sesuai jadwal. Perlu ditingkatkan.${catatanGagal}`;
+  return { skor, maksimal: 33, persentase, status, ringkasan };
+};
+const tentukanGrade = (skorTotal: number): "A" | "B" | "C" | "D" | "E" => {
+  if (skorTotal >= 85) return "A";
+  if (skorTotal >= 70) return "B";
+  if (skorTotal >= 55) return "C";
+  if (skorTotal >= 40) return "D";
+  return "E";
+};
+export const hitungDanSimpanFinancialHealth = async (userId: string) => {
+  const disiplinAnggaran = await hitungDisiplinAnggaran(userId);
+  const pengelolaanPinjaman = await hitungPengelolaanPinjaman(userId);
+  const targetNabung = await hitungTargetNabung(userId);
+  const skorTotal =
+    disiplinAnggaran.skor + pengelolaanPinjaman.skor + targetNabung.skor;
+  const grade = tentukanGrade(skorTotal);
+  const financialHealth = await FinancialHealthModel.findOneAndUpdate(
+    { user: userId },
+    {
+      user: userId,
+      skorTotal,
+      grade,
+      disiplinAnggaran: { ...disiplinAnggaran, saranPerkembangan: [] },
+      pengelolaanPinjaman: { ...pengelolaanPinjaman, saranPerkembangan: [] },
+      targetNabung: { ...targetNabung, saranPerkembangan: [] },
+    },
+    { new: true, upsert: true, runValidators: true },
+  );
+  return financialHealth;
+};
+export const postFinancialHealth = async (req: IReqUser, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res
+      .status(401)
+      .json({ message: "Unauthorized: User tidak teridentifikasi" });
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  try {
+    const disiplinAnggaran = await hitungDisiplinAnggaran(userId.toString());
+    const pengelolaanPinjaman = await hitungPengelolaanPinjaman(
+      userId.toString(),
+    );
+    const targetNabung = await hitungTargetNabung(userId.toString());
+    const skorTotal =
+      disiplinAnggaran.skor + pengelolaanPinjaman.skor + targetNabung.skor;
+    const grade = tentukanGrade(skorTotal);
+    const aiResponse = (await askAIStream(
+      JSON.stringify({
+        skorTotal,
+        grade,
+        disiplinAnggaran,
+        pengelolaanPinjaman,
+        targetNabung,
+      }),
+      res,
+    )) as unknown as IAIResult;
+    const saranDisiplin = aiResponse?.disiplinAnggaran?.saranPerkembangan || [
+      "Tetap catat setiap pengeluaran sekecil apa pun.",
+      "Sisihkan uang tabungan di awal bulan, bukan di akhir.",
+      "Kalau ada sisa budget, simpan ke tabungan daripada dihabiskan.",
+    ];
+    const saranPinjaman = aiResponse?.pengelolaanPinjaman
+      ?.saranPerkembangan || [
+      "Prioritaskan melunasi utang dengan bunga paling tinggi.",
+      "Tunda ambil pinjaman baru kalau belum benar-benar perlu.",
+      "Kalau ada uang lebih, coba bayar cicilan lebih awal.",
+    ];
+    const saranTabungan = aiResponse?.targetNabung?.saranPerkembangan || [
+      "Buat target tabungan dengan nominal dan tenggat waktu yang realistis.",
+      "Sisihkan tabungan secara otomatis begitu menerima pemasukan.",
+      "Pantau progres target tabunganmu secara berkala supaya tetap on-track.",
+    ];
+    const financialHealth = await FinancialHealthModel.findOneAndUpdate(
+      { user: userId },
+      {
+        user: userId,
+        skorTotal,
+        grade,
+        disiplinAnggaran: {
+          ...disiplinAnggaran,
+          ringkasan:
+            aiResponse?.disiplinAnggaran?.ringkasan ||
+            disiplinAnggaran.ringkasan,
+          saranPerkembangan: saranDisiplin,
+        },
+        pengelolaanPinjaman: {
+          ...pengelolaanPinjaman,
+          ringkasan:
+            aiResponse?.pengelolaanPinjaman?.ringkasan ||
+            pengelolaanPinjaman.ringkasan,
+          saranPerkembangan: saranPinjaman,
+        },
+        targetNabung: {
+          ...targetNabung,
+          ringkasan:
+            aiResponse?.targetNabung?.ringkasan || targetNabung.ringkasan,
+          saranPerkembangan: saranTabungan,
+        },
+      },
+      { new: true, upsert: true, runValidators: true },
+    );
+    res.write(
+      `data: ${JSON.stringify({
+        type: "done",
+        message: "Berhasil menghitung detail Financial Health",
+        data: financialHealth,
+      })}\n\n`,
+    );
+  } catch (error: any) {
+    console.error("❌ Error pada postFinancialHealth:", error.message);
+    res.write(
+      `data: ${JSON.stringify({
+        type: "error",
+        message: "Gagal menghitung Financial Health",
+        error: String(error.message || error),
+      })}\n\n`,
+    );
+  } finally {
+    res.end();
+  }
+};
+export const getFinancialHealth = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const latestData = await FinancialHealthModel.findOne({ user: userId })
+      .select(
+        "skorTotal grade disiplinAnggaran pengelolaanPinjaman targetNabung createdAt updatedAt",
+      )
+      .sort({ updatedAt: -1 });
+    if (!latestData) {
+      return res.status(200).json({
+        message: "Belum ada data Financial Health",
+        data: null,
+      });
+    }
+    return res.status(200).json({
+      message: "Berhasil mengambil data Financial Health terbaru",
+      data: latestData,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Gagal mengambil data Financial Health",
+      error: String(error),
+    });
+  }
+};
+export const ambilKondisiKeuangan = async (userId: string) => {
+  const sekarang = new Date();
+  const tigaPuluhHariLalu = new Date();
+  tigaPuluhHariLalu.setDate(tigaPuluhHariLalu.getDate() - 30);
+  const [pemasukan, pinjamanAktif, budgetAktif, targetAktif, fh] = await Promise.all([
+    TransaksiModel.find({ user: userId, tipe: "pemasukan", tanggal: { $gte: tigaPuluhHariLalu } }),
+    PinjamanModel.find({ user: userId, statusPinjaman: { $ne: "Lunas" } }),
+    BudgetingModel.find({ user: userId, Tanggal_Selesai: { $gte: sekarang } }),
+    TargetTabungModel.find({ user: userId, status: "Aktif" }),
+    FinancialHealthModel.findOne({ user: userId }).select(
+      "skorTotal grade disiplinAnggaran.status pengelolaanPinjaman.status targetNabung.status",
+    ),
+  ]);
+  const pemasukanBulanan = pemasukan.reduce((a, t) => a + (t.nominal ?? 0), 0);
+  const cicilanAktif = pinjamanAktif.reduce((a, p) => a + (p.cicilanBulanan ?? 0), 0);
+  const totalBudgetBulanan = budgetAktif.reduce((a, b) => a + (b.Batas_PerBulan ?? 0), 0);
+  const tabunganBulanan = targetAktif.reduce((a, t) => {
+    const sisaBulan = Math.max(
+      1,
+      Math.ceil((new Date(t.deadlineTarget).getTime() - sekarang.getTime()) / (1000 * 60 * 60 * 24 * 30)),
+    );
+    return a + Math.max(0, t.targetNominal - t.terkumpulNominal) / sisaBulan;
+  }, 0);
+  return {
+    pemasukanBulanan,
+    cicilanAktif,
+    jumlahPinjamanAktif: pinjamanAktif.length,
+    totalBudgetBulanan,
+    tabunganBulanan: Math.round(tabunganBulanan),
+    financialHealth: fh
+      ? {
+          skorTotal: fh.skorTotal,
+          grade: fh.grade,
+          statusAnggaran: fh.disiplinAnggaran?.status,
+          statusPinjaman: fh.pengelolaanPinjaman?.status,
+          statusTabungan: fh.targetNabung?.status,
+        }
+      : null,
+  };
+};
+=== src/controllers/kalkulator.controller.ts ===
+import { Request, Response } from "express";
+import SimulasiPinjamanModel from "../models/kalkulator.model";
+import { ambilKondisiKeuangan } from "./financialHealth.controller";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import { askAIStream } from "../services/ai.KalkulatorBunga.services";
+interface IAIResult {
+  levelRisiko: "Rendah" | "Sedang" | "Tinggi";
+  analisisAI: string;
+}
+const parseAngka = (value: unknown): number => {
+  if (value === undefined || value === null || value === "") return NaN;
+  const cleaned = String(value).replace(/\./g, "").replace(/,/g, ".");
+  return Number(cleaned);
+};
+export const postKalkulatorBunga = async (req: IReqUser, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res
+      .status(401)
+      .json({ message: "Unauthorized: User tidak teridentifikasi" });
+  }
+  const {
+    jumlahPinjaman,
+    bungaPerBulan,
+    tenorCicilan,
+    dendaPerHari,
+    deadlineTarget,
+  } = req.body;
+  const pokok = parseAngka(jumlahPinjaman);
+  const bunga = Number(String(bungaPerBulan).replace(",", "."));
+  const tenor = parseAngka(tenorCicilan);
+  const denda = dendaPerHari != undefined ? parseAngka(dendaPerHari) || 0 : 0;
+  if (!pokok || pokok <= 0) {
+    return res
+      .status(400)
+      .json({ message: "Jumlah Pinjaman harus lebih dari 0" });
+  }
+  if (Number.isNaN(bunga) || bunga < 0) {
+    return res.status(400).json({ message: "Bunga per Bulan tidak valid" });
+  }
+  if (!tenor || tenor <= 0) {
+    return res
+      .status(400)
+      .json({ message: "Tenor Cicilan harus lebih dari 0 bulan" });
+  }
+  const totalBunga = pokok * (bunga / 100) * tenor;
+  const totalPembayaran = pokok + totalBunga;
+  const totalBayarPerBulan = totalPembayaran / tenor;
+  const bungaEfektifTahunan = (Math.pow(1 + bunga / 100, 12) - 1) * 100;
+  const k = await ambilKondisiKeuangan(userId.toString());
+  const ada = k.pemasukanBulanan > 0;
+  const dtiSebelum = ada
+    ? Math.round((k.cicilanAktif / k.pemasukanBulanan) * 100)
+    : null;
+  const dtiSesudah = ada
+    ? Math.round(
+        ((k.cicilanAktif + totalBayarPerBulan) / k.pemasukanBulanan) * 100,
+      )
+    : null;
+  const sisaRuang = ada
+    ? Math.round(
+        k.pemasukanBulanan -
+          k.cicilanAktif -
+          k.totalBudgetBulanan -
+          k.tabunganBulanan -
+          totalBayarPerBulan,
+      )
+    : null;
+  let kemampuanBayar:
+    | "Mampu"
+    | "Pas-pasan"
+    | "Tidak Mampu"
+    | "Tidak diketahui" = "Tidak diketahui";
+  if (ada && sisaRuang !== null && dtiSesudah !== null) {
+    if (sisaRuang < 0 || dtiSesudah > 50) kemampuanBayar = "Tidak Mampu";
+    else if (sisaRuang < k.pemasukanBulanan * 0.1 || dtiSesudah > 30)
+      kemampuanBayar = "Pas-pasan";
+    else kemampuanBayar = "Mampu";
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  try {
+    const aiResponse = (await askAIStream(
+      JSON.stringify({
+           jumlahPinjaman: pokok,
+    bungaPerBulan: bunga,
+    tenorCicilan: tenor,
+    dendaPerHari: denda,
+    totalBunga: Number(totalBunga.toFixed(2)),
+    totalPembayaran: Number(totalPembayaran.toFixed(2)),
+    totalBayarPerBulan: Number(totalBayarPerBulan.toFixed(2)),
+    bungaEfektifTahunan: Number(bungaEfektifTahunan.toFixed(1)),
+    pemasukanBulanan: k.pemasukanBulanan,
+    cicilanAktif: k.cicilanAktif,
+    jumlahPinjamanAktif: k.jumlahPinjamanAktif,
+    totalBudgetBulanan: k.totalBudgetBulanan,
+    tabunganBulanan: k.tabunganBulanan,
+    dtiSebelum,
+    dtiSesudah,
+    sisaRuang,
+    kemampuanBayar,
+    financialHealth: k.financialHealth,
+      }),
+      res,
+    )) as IAIResult;
+    const levelRisiko =
+      aiResponse?.levelRisiko ||
+      (bunga > 4 ? "Tinggi" : bunga > 2 ? "Sedang" : "Rendah");
+    const analisisAI =
+  aiResponse?.analisisAI ||
+  (kemampuanBayar === "Tidak diketahui"
+    ? "Catat pemasukanmu dulu agar kemampuan bayar bisa dinilai. Usahakan total cicilan **tidak melebihi 30% pemasukan**."
+    : `Berdasarkan kondisi keuanganmu, kemampuan bayarmu untuk pinjaman ini: **${kemampuanBayar}**. Rasio cicilan naik dari **${dtiSebelum}%** menjadi **${dtiSesudah}%** dari pemasukan.`);
+    const newSimulasi = await SimulasiPinjamanModel.create({
+      user: userId,
+      jumlahPinjaman: pokok,
+      bungaPerBulan: bunga,
+      tenorCicilan: tenor,
+      dendaPerHari: denda,
+      deadlineTarget,
+      totalBunga: Number(totalBunga.toFixed(2)),
+      totalPembayaran: Number(totalPembayaran.toFixed(2)),
+      totalBayarPerBulan: Number(totalBayarPerBulan.toFixed(2)),
+      bungaEfektifTahunan: Number(bungaEfektifTahunan.toFixed(1)),
+      levelRisiko: levelRisiko,
+      analisisAI: analisisAI,
+    });
+    res.write(
+      `data: ${JSON.stringify({
+        type: "done",
+        message: "Berhasil menghitung dan menyimpan simulasi",
+        data: newSimulasi,
+        pemasukanBulanan: k.pemasukanBulanan,
+        cicilanAktif: k.cicilanAktif,
+        jumlahPinjamanAktif: k.jumlahPinjamanAktif,
+        totalBudgetBulanan: k.totalBudgetBulanan,
+        tabunganBulanan: k.tabunganBulanan,
+        dtiSebelum,
+        dtiSesudah,
+        sisaRuang,
+        kemampuanBayar,
+        financialHealth: k.financialHealth,
+      })}\n\n`,
+    );
+  } catch (error: any) {
+    console.error("❌ Error pada postKalkulatorBunga:", error.message);
+    res.write(
+      `data: ${JSON.stringify({
+        type: "error",
+        message: "Gagal menghitung simulasi",
+        error: String(error.message || error),
+      })}\n\n`,
+    );
+  } finally {
+    res.end();
+  }
+};
+export const getKalkulatorBunga = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const latestData = await SimulasiPinjamanModel.findOne({ user: userId })
+      .select(
+        "jumlahPinjaman bungaPerBulan tenorCicilan dendaPerHari totalBunga totalPembayaran totalBayarPerBulan bungaEfektifTahunan levelRisiko analisisAI createdAt",
+      )
+      .sort({ createdAt: -1 });
+    if (!latestData) {
+      return res.status(200).json({
+        message: "Belum ada data simulasi",
+        data: null,
+      });
+    }
+    return res.status(200).json({
+      message: "Berhasil mengambil data simulasi terbaru",
+      data: latestData,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal mengambil data", error: String(error) });
+  }
+};
+=== src/controllers/pinjaman.controller.ts ===
+import { Request, Response } from "express";
+import { Types } from "mongoose";
+import PinjamanModel from "../models/pinjaman.model";
+import TransaksiModel from "../models/transaksi.model";
+import { IReqUser } from "../middlewares/auth.Middleware";
+const BATAS_PINJAMAN_AKTIF = 3;
+const PESAN_PERINGATAN =
+  "Jumlah pinjaman aktif kamu melebihi 3 platform. Kondisi ini dapat berisiko terhadap kesehatan keuanganmu.";
+const buatPeringatan = (jumlahAktif: number) =>
+  jumlahAktif > BATAS_PINJAMAN_AKTIF ? PESAN_PERINGATAN : null;
+const HARI_MS = 24 * 60 * 60 * 1000;
+const hitungSisaHari = (jt: Date) =>
+  Math.ceil((new Date(jt).getTime() - Date.now()) / HARI_MS);
+const wajibPelunasan = (jt: Date) => hitungSisaHari(jt) <= 1; // H-1 dan lewat
+const hitungCicilanMinimum = (total: number, tenor: number) =>
+  tenor > 0 ? Math.ceil(total / tenor) : total;
+export const postPinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const {
+      namaPlatform,
+      jenisPinjaman,
+      totalPinjaman,
+      tenorCicilan,
+      cicilanBulanan,
+      totalYangHarusDibayar,
+      jatuhTempo,
+      persenBunga,
+    } = req.body;
+    const angka = (v: unknown) =>
+      Number(
+        String(v ?? "")
+          .replace(/\./g, "")
+          .replace(/,/g, "."),
+      );
+    const nominalTotal = angka(totalPinjaman);
+    const tenor = angka(tenorCicilan);
+    const totalBayar = angka(totalYangHarusDibayar);
+    const sisaTagihanAwal = totalBayar > 0 ? totalBayar : nominalTotal;
+    const cicilanInput = angka(cicilanBulanan);
+    const cicilan =
+      cicilanInput > 0
+        ? cicilanInput
+        : Math.ceil(sisaTagihanAwal / (tenor || 1));
+    if (!nominalTotal || nominalTotal <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Total Pinjaman harus lebih dari 0" });
+    }
+    if (!tenor || tenor <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Tenor Cicilan harus lebih dari 0 bulan" });
+    }
+    const tglTempo = jatuhTempo ? new Date(jatuhTempo) : new Date();
+    if (isNaN(tglTempo.getTime())) {
+      return res
+        .status(400)
+        .json({ message: "Format Jatuh Tempo tidak valid" });
+    }
+    const newPinjaman = await PinjamanModel.create({
+      user: userId,
+      namaPlatform,
+      jenisPinjaman,
+      totalPinjaman: nominalTotal,
+      tenorCicilan: tenor,
+      cicilanBulanan: cicilan,
+      totalYangHarusDibayar: sisaTagihanAwal,
+      jatuhTempo: jatuhTempo ? new Date(jatuhTempo) : new Date(),
+      persenBunga: Number(persenBunga) || 0,
+      statusPinjaman: "Aktif",
+    });
+    const jumlahAktif = await PinjamanModel.countDocuments({
+      user: userId,
+      statusPinjaman: { $ne: "Lunas" },
+    });
+    return res.status(201).json({
+      message: "Berhasil menambahkan data pinjaman",
+      data: newPinjaman,
+      jumlahAktif,
+      peringatan: buatPeringatan(jumlahAktif),
+    });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal membuat data pinjaman", error: String(error) });
+  }
+};
+export const hitungDataPinjaman = async (userId: string) => {
+  const listPinjaman = await PinjamanModel.find({ user: userId }).sort({
+    createdAt: -1,
+  });
+  const formattedData = listPinjaman.map((item) => {
+    const progress =
+      item.totalPinjaman > 0
+        ? ((item.totalPinjaman - item.totalYangHarusDibayar) /
+            item.totalPinjaman) *
+          100
+        : 0;
+    const sisaHari = hitungSisaHari(item.jatuhTempo);
+    return {
+      _id: item._id,
+      namaPlatform: item.namaPlatform,
+      jenisPinjaman: item.jenisPinjaman,
+      totalPinjaman: item.totalPinjaman,
+      tenorCicilan: item.tenorCicilan,
+      cicilanBulanan: item.cicilanBulanan,
+      totalYangHarusDibayar: item.totalYangHarusDibayar,
+      jatuhTempo: item.jatuhTempo,
+      persenBunga: item.persenBunga,
+      statusPinjaman: item.statusPinjaman,
+      progress: Number(Math.max(0, Math.min(100, progress)).toFixed(1)),
+      cicilanMinimum: hitungCicilanMinimum(
+        item.totalPinjaman,
+        item.tenorCicilan,
+      ),
+      sisaHari,
+      mode:
+        item.statusPinjaman === "Lunas"
+          ? "lunas"
+          : wajibPelunasan(item.jatuhTempo)
+            ? "pelunasan"
+            : "cicilan",
+    };
+  });
+  const belumDibayar = listPinjaman.reduce((acc, item) => {
+    return acc + (item.totalYangHarusDibayar ?? 0);
+  }, 0);
+  const sudahDibayar = listPinjaman.reduce((acc, item) => {
+    const terbayarPerItem =
+      (item.totalPinjaman ?? 0) - (item.totalYangHarusDibayar ?? 0);
+    return acc + Math.max(0, terbayarPerItem);
+  }, 0);
+  const kewajibanPerbulan = listPinjaman.reduce((acc, item) => {
+    if (item.totalYangHarusDibayar > 0 && item.statusPinjaman !== "Lunas") {
+      return acc + (item.cicilanBulanan ?? 0);
+    }
+    return acc;
+  }, 0);
+  const jumlahAktif = listPinjaman.filter(
+    (p) => p.statusPinjaman !== "Lunas",
+  ).length;
+  return {
+    summary: { belumDibayar, sudahDibayar, kewajibanPerbulan },
+    totalPinjaman: formattedData.length,
+    jumlahAktif,
+    peringatan: buatPeringatan(jumlahAktif),
+    data: formattedData,
+  };
+};
+export const getAllPinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const result = await hitungDataPinjaman(userId.toString());
+    return res.status(200).json({
+      message: "Berhasil mengambil data pinjaman",
+      ...result,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal mengambil data pinjaman", error: String(error) });
+  }
+};
+export const putPinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const { nominalBayar, Sumber_Dana } = req.body;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const pinjaman = await PinjamanModel.findOne({ _id: id, user: userId });
+    if (!pinjaman) {
+      return res.status(404).json({ message: "Pinjaman tidak ditemukan" });
+    }
+    if (pinjaman.statusPinjaman === "Lunas") {
+      return res
+        .status(400)
+        .json({ message: "Pinjaman ini sudah lunas, tidak bisa dibayar lagi" });
+    }
+    if (wajibPelunasan(pinjaman.jatuhTempo)) {
+      return res.status(400).json({
+        message:
+          "Sudah H-1 jatuh tempo. Pilih Pelunasan atau Perpanjang tempo.",
+      });
+    }
+    const minimum = hitungCicilanMinimum(
+      pinjaman.totalPinjaman,
+      pinjaman.tenorCicilan,
+    );
+    const sisa = pinjaman.totalYangHarusDibayar;
+    const bayarInput =
+      Number(nominalBayar) > 0 ? Number(nominalBayar) : minimum;
+    if (bayarInput < Math.min(minimum, sisa)) {
+      return res.status(400).json({
+        message: `Cicilan minimal Rp${minimum.toLocaleString("id-ID")}`,
+      });
+    }
+    const bayar = Math.min(bayarInput, sisa);
+    const sisaTagihanBaru = sisa - bayar;
+    const tglSekarang = new Date(pinjaman.jatuhTempo);
+    const jatuhTempoBaru = new Date(
+      tglSekarang.setMonth(tglSekarang.getMonth() + 1),
+    );
+    pinjaman.totalYangHarusDibayar = sisaTagihanBaru;
+    pinjaman.jatuhTempo = jatuhTempoBaru;
+    if (sisaTagihanBaru === 0) {
+      pinjaman.statusPinjaman = "Lunas";
+    }
+    await pinjaman.save();
+    await TransaksiModel.create({
+      user: userId,
+      Catatan_Transaksi: `Bayar Cicilan: ${pinjaman.namaPlatform}`,
+      tipe: "pengeluaran",
+      kategori: "Tagihan",
+      Sumber_Dana: Sumber_Dana || "Tunai",
+      nominal: bayar,
+      tanggal: new Date(),
+    });
+    return res.status(200).json({
+      message: `Berhasil membayar cicilan ${pinjaman.namaPlatform} sebesar Rp${bayar.toLocaleString("id-ID")}`,
+      data: pinjaman,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Gagal memproses pembayaran cicilan",
+      error: String(error),
+    });
+  }
+};
+export const editPinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const pinjaman = await PinjamanModel.findOne({ _id: id, user: userId });
+    if (!pinjaman) {
+      return res.status(404).json({ message: "Pinjaman tidak ditemukan" });
+    }
+    const {
+      namaPlatform,
+      jenisPinjaman,
+      totalPinjaman,
+      tenorCicilan,
+      cicilanBulanan,
+      totalYangHarusDibayar,
+      jatuhTempo,
+      persenBunga,
+      statusPinjaman,
+    } = req.body;
+    if (namaPlatform !== undefined) pinjaman.namaPlatform = namaPlatform;
+    if (jenisPinjaman !== undefined) pinjaman.jenisPinjaman = jenisPinjaman;
+    if (totalPinjaman !== undefined)
+      pinjaman.totalPinjaman = Number(totalPinjaman);
+    if (tenorCicilan !== undefined)
+      pinjaman.tenorCicilan = Number(tenorCicilan);
+    if (cicilanBulanan !== undefined)
+      pinjaman.cicilanBulanan = Number(cicilanBulanan);
+    if (totalYangHarusDibayar !== undefined)
+      pinjaman.totalYangHarusDibayar = Number(totalYangHarusDibayar);
+    if (jatuhTempo !== undefined) pinjaman.jatuhTempo = new Date(jatuhTempo);
+    if (persenBunga !== undefined) pinjaman.persenBunga = Number(persenBunga);
+    if (pinjaman.totalYangHarusDibayar === 0) {
+      pinjaman.statusPinjaman = "Lunas";
+    }
+    await pinjaman.save();
+    return res.status(200).json({
+      message: "Berhasil memperbarui data pinjaman",
+      data: pinjaman,
+    });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal update data pinjaman", error: String(error) });
+  }
+};
+export const deletePinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const deletedData = await PinjamanModel.findOneAndDelete({
+      _id: id,
+      user: userId,
+    });
+    if (!deletedData) {
+      return res.status(404).json({
+        message: "Data pinjaman tidak ditemukan atau bukan milik Anda",
+      });
+    }
+    return res.status(200).json({
+      message: "Berhasil menghapus data pinjaman",
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal menghapus data pinjaman", error: String(error) });
+  }
+};
+export const lunasiPinjaman = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const { Sumber_Dana } = req.body;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const pinjaman = await PinjamanModel.findOne({ _id: id, user: userId });
+    if (!pinjaman)
+      return res.status(404).json({ message: "Pinjaman tidak ditemukan" });
+    if (pinjaman.statusPinjaman === "Lunas")
+      return res.status(400).json({ message: "Pinjaman ini sudah lunas" });
+    const bayar = pinjaman.totalYangHarusDibayar;
+    pinjaman.totalYangHarusDibayar = 0;
+    pinjaman.statusPinjaman = "Lunas";
+    await pinjaman.save();
+    await TransaksiModel.create({
+      user: userId,
+      Catatan_Transaksi: `Pelunasan: ${pinjaman.namaPlatform}`,
+      tipe: "pengeluaran",
+      kategori: "Tagihan",
+      Sumber_Dana: Sumber_Dana || "Tunai",
+      nominal: bayar,
+      tanggal: new Date(),
+    });
+    return res.status(200).json({
+      message: `Berhasil melunasi ${pinjaman.namaPlatform} sebesar Rp${bayar.toLocaleString("id-ID")}`,
+      data: pinjaman,
+    });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal melunasi pinjaman", error: String(error) });
+  }
+};
+export const perpanjangTempo = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const { jatuhTempoBaru } = req.body;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const pinjaman = await PinjamanModel.findOne({ _id: id, user: userId });
+    if (!pinjaman)
+      return res.status(404).json({ message: "Pinjaman tidak ditemukan" });
+    if (pinjaman.statusPinjaman === "Lunas")
+      return res.status(400).json({ message: "Pinjaman ini sudah lunas" });
+    const tanggalBaru = new Date(jatuhTempoBaru);
+    if (
+      isNaN(tanggalBaru.getTime()) ||
+      tanggalBaru <= new Date(pinjaman.jatuhTempo)
+    ) {
+      return res.status(400).json({
+        message: "Tanggal baru harus lebih lambat dari jatuh tempo saat ini",
+      });
+    }
+    pinjaman.jatuhTempo = tanggalBaru;
+    await pinjaman.save();
+    return res
+      .status(200)
+      .json({ message: "Jatuh tempo berhasil diperpanjang", data: pinjaman });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal memperpanjang tempo", error: String(error) });
+  }
+};
+=== src/controllers/profile.controller.ts ===
+import { Request, Response } from "express";
+import ProfileModel from "../models/profile.model";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import UserModel  from "../models/user.model";
+export const postProfile = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    console.log("User dari Token:", req.user);
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const { fotoProfilUrl, saldoSekarang, sumberPemasukan, onboardingCompleted } = req.body;
+    const updateData: Record<string, any> = {};
+    if (fotoProfilUrl !== undefined) updateData.fotoProfilUrl = fotoProfilUrl;
+    if (saldoSekarang !== undefined) updateData.saldoSekarang = Number(saldoSekarang);
+    if (sumberPemasukan !== undefined) updateData.sumberPemasukan = sumberPemasukan;
+    if (onboardingCompleted !== undefined) updateData.onboardingCompleted = onboardingCompleted;
+    const profile = await ProfileModel.findOneAndUpdate(
+      { user: userId }, 
+      { $set: updateData }, 
+      { new: true, upsert: true, runValidators: true } 
+    );
+    return res.status(200).json({ message: "Profile berhasil disimpan", data: profile });
+  } catch (error) {
+    return res.status(400).json({ message: "Gagal membuat Profile", error: String(error) });
+  }
+};
+export const getProfile = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    const profile = await ProfileModel.findOne({ user: userId }).populate(
+      "user",
+      "fullName username email"
+    );
+    if (!profile) {
+      return res.status(404).json({ message: "Profile belum dibuat" });
+    }
+    res.status(200).json({
+      fullName: (profile.user as any).fullName,
+      username: (profile.user as any).username,
+      email: (profile.user as any).email,
+      fotoProfilUrl: profile.fotoProfilUrl,
+      saldoSekarang: profile.saldoSekarang,
+      sumberPemasukan: profile.sumberPemasukan,
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: "Gagal mengambil profile", error: error.message });
+  }
+};
+export const updateProfile = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const { username, fullName, fotoProfilUrl, sumberPemasukan } = req.body;
+    if (username || fullName) {
+      await UserModel.findByIdAndUpdate(
+        userId,
+        {
+          ...(username && { username }),
+          ...(fullName && { fullName }),
+        },
+        { runValidators: true }
+      );
+    }
+    const updateDataProfile: Record<string, any> = {};
+    if (fotoProfilUrl !== undefined) updateDataProfile.fotoProfilUrl = fotoProfilUrl;
+    if (sumberPemasukan !== undefined) updateDataProfile.sumberPemasukan = sumberPemasukan;
+    const profile = await ProfileModel.findOneAndUpdate(
+      { user: userId },
+      updateDataProfile,
+      { new: true, runValidators: true }
+    ).populate("user", "fullName username email");
+    if (!profile) {
+      return res.status(404).json({ message: "Profile tidak ditemukan atau Anda tidak memiliki akses" });
+    }
+    return res.status(200).json({ message: "Profile berhasil diupdate", data: profile });
+  } catch (error) {
+    return res.status(400).json({ message: "Gagal update profile", error: String(error) });
+  }
+};
+=== src/controllers/targetTabung.controller.ts ===
+import { Response } from "express";
+import TargetTabungModel from "../models/targetTabung.model";
+import TransaksiModel from "../models/transaksi.model";
+import { IReqUser } from "../middlewares/auth.Middleware";
+export const postTargetTabung = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const { icon, namaTarget, targetNominal, deadlineTarget } = req.body || {};
+    const nominalTarget = Number(targetNominal);
+    const deadline = new Date(deadlineTarget);
+    if (!icon) {
+      return res.status(400).json({ message: "Icon target wajib dipilih" });
+    }
+    if (!namaTarget || !namaTarget.trim()) {
+      return res.status(400).json({ message: "Nama Target wajib diisi" });
+    }
+    if (!nominalTarget || nominalTarget <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Target Nominal harus lebih dari 0" });
+    }
+    if (isNaN(deadline.getTime())) {
+      return res.status(400).json({ message: "Deadline Target tidak valid" });
+    }
+    if (deadline <= new Date()) {
+      return res
+        .status(400)
+        .json({ message: "Deadline Target harus di masa mendatang" });
+    }
+    const newTarget = await TargetTabungModel.create({
+      user: userId,
+      icon,
+      namaTarget,
+      targetNominal: nominalTarget,
+      terkumpulNominal: 0,
+      deadlineTarget: deadline,
+      status: "Aktif",
+    });
+    return res.status(201).json({
+      message: "Berhasil membuat target tabung baru",
+      data: newTarget,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal membuat target tabung",
+        error: String(error.message || error),
+      });
+  }
+};
+export const getAllTargetTabung = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const listTarget = await TargetTabungModel.find({ user: userId }).sort({
+      createdAt: -1,
+    });
+    const today = new Date();
+    const formattedData = listTarget.map((item) => {
+      const persentase =
+        item.targetNominal > 0
+          ? Math.min(
+              100,
+              Math.round((item.terkumpulNominal / item.targetNominal) * 100),
+            )
+          : 0;
+      const deadline = new Date(item.deadlineTarget);
+      const selisihMs = deadline.getTime() - today.getTime();
+      const sisaHari = Math.max(
+        0,
+        Math.ceil(selisihMs / (1000 * 60 * 60 * 24)),
+      );
+      return {
+        _id: item._id,
+        icon: item.icon,
+        namaTarget: item.namaTarget,
+        targetNominal: item.targetNominal,
+        terkumpulNominal: item.terkumpulNominal,
+        deadlineTarget: item.deadlineTarget,
+        status: item.status,
+        persentase,
+        sisaHari,
+      };
+    });
+    const totalMenabung = listTarget.reduce(
+      (acc, item) => acc + (item.terkumpulNominal ?? 0),
+      0,
+    );
+    const totalTarget = listTarget.reduce(
+      (acc, item) => acc + (item.targetNominal ?? 0),
+      0,
+    );
+    return res.status(200).json({
+      message: "Berhasil mengambil data target tabung",
+      summary: {
+        totalMenabung,
+        totalTarget,
+      },
+      totalItems: formattedData.length,
+      data: formattedData,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal mengambil data target tabung",
+        error: String(error.message || error),
+      });
+  }
+};
+export const setorTargetTabung = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const { nominalSetor, Sumber_Dana } = req.body;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const setor = Number(nominalSetor);
+    if (!setor || setor <= 0) {
+      return res
+        .status(400)
+        .json({ message: "Nominal setor harus lebih dari 0" });
+    }
+    const target = await TargetTabungModel.findOne({ _id: id, user: userId });
+    if (!target) {
+      return res.status(404).json({ message: "Target tabung tidak ditemukan" });
+    }
+    target.terkumpulNominal += setor;
+    if (target.terkumpulNominal >= target.targetNominal) {
+      target.status = "Tercapai";
+    }
+    await target.save();
+    return res.status(200).json({
+      message: `Berhasil menyisihkan Rp${setor.toLocaleString("id-ID")} ke ${target.namaTarget}`,
+      data: target,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal memperbarui tabungan",
+        error: String(error.message || error),
+      });
+  }
+};
+export const editTargetTabung = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const target = await TargetTabungModel.findOne({ _id: id, user: userId });
+    if (!target) {
+      return res.status(404).json({ message: "Target tabung tidak ditemukan" });
+    }
+    const {
+      icon,
+      namaTarget,
+      targetNominal,
+      deadlineTarget,
+      terkumpulNominal,
+      status,
+    } = req.body;
+    if (icon !== undefined) target.icon = icon;
+    if (namaTarget !== undefined) target.namaTarget = namaTarget;
+    if (targetNominal !== undefined)
+      target.targetNominal = Number(targetNominal);
+    if (deadlineTarget !== undefined)
+      target.deadlineTarget = new Date(deadlineTarget);
+    if (terkumpulNominal !== undefined)
+      target.terkumpulNominal = Number(terkumpulNominal);
+    if (status !== undefined) target.status = status;
+    if (target.terkumpulNominal >= target.targetNominal) {
+      target.status = "Tercapai";
+    } else {
+      target.status = "Aktif";
+    }
+    await target.save();
+    return res.status(200).json({
+      message: "Berhasil memperbarui data target tabung",
+      data: target,
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal mengupdate target tabung",
+        error: String(error.message || error),
+      });
+  }
+};
+export const deleteTargetTabung = async (req: IReqUser, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const deletedData = await TargetTabungModel.findOneAndDelete({
+      _id: id,
+      user: userId,
+    });
+    if (!deletedData) {
+      return res
+        .status(404)
+        .json({
+          message: "Target tabung tidak ditemukan atau bukan milik Anda",
+        });
+    }
+    return res.status(200).json({
+      message: "Berhasil menghapus target tabung",
+    });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({
+        message: "Gagal menghapus target tabung",
+        error: String(error.message || error),
+      });
+  }
+};
+=== src/controllers/transaksi.controller.ts ===
+import { Response } from "express";
+import TransaksiModel from "../models/transaksi.model";
+import { IReqUser } from "../middlewares/auth.Middleware";
+import ProfileModel from "../models/profile.model";
+import TargetTabungModel from "../models/targetTabung.model";
+export const createTransaksi = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: User tidak teridentifikasi" });
+    }
+    const {
+      Catatan_Transaksi,
+      tipe,
+      kategori,
+      Sumber_Dana,
+      nominal,
+      tanggal,
+      targetTabungId,
+    } = req.body;
+    const transaksi = await TransaksiModel.create({
+      user: userId,
+      Catatan_Transaksi,
+      tipe,
+      kategori,
+      Sumber_Dana,
+      nominal: Math.abs(Number(nominal)),
+      tanggal: tanggal ? new Date(tanggal) : new Date(),
+      targetTabungId: targetTabungId || null,
+    });
+    return res
+      .status(201)
+      .json({ message: "Transaksi berhasil dibuat", data: transaksi });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal membuat transaksi", error: String(error) });
+  }
+};
+export const hitungDataTransaksi = async (userId: string, type?: string) => {
+  const allTransaksi = await TransaksiModel.find({ user: userId });
+  const totalPemasukan = allTransaksi
+    .filter((t) => t.tipe === "pemasukan")
+    .reduce((acc, curr) => acc + Math.abs(curr.nominal ?? 0), 0);
+  const totalPengeluaran = allTransaksi
+    .filter((t) => t.tipe === "pengeluaran")
+    .reduce((acc, curr) => acc + Math.abs(curr.nominal ?? 0), 0);
+  const saldoAwal = await ProfileModel.findOne({ user: userId }).select(
+    "saldoSekarang",
+  );
+  const saldo =
+    (saldoAwal?.saldoSekarang ?? 0) + totalPemasukan - totalPengeluaran;
+  const filter: any = { user: userId };
+  if (type) {
+    filter.tipe = type;
+  }
+  const transaksiList = await TransaksiModel.find(filter).sort({
+    tanggal: -1,
+  });
+  return {
+    summary: {
+      saldo,
+      totalPemasukan,
+      totalPengeluaran,
+    },
+    data: transaksiList,
+  };
+};
+export const getAllTransaksi = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id?.toString();
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const result = await hitungDataTransaksi(userId, req.query.type as string);
+    return res.status(200).json(result);
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal mengambil data", error: String(error) });
+  }
+};
+export const getTransaksiById = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const transaksi = await TransaksiModel.findOne({
+      _id: req.params.id,
+      user: userId,
+    });
+    if (!transaksi) {
+      return res.status(404).json({ message: "Transaksi tidak ditemukan" });
+    }
+    return res.status(200).json({ data: transaksi });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Gagal mengambil data", error: String(error) });
+  }
+};
+export const updateTransaksi = async (req: IReqUser, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const oldTransaksi = await TransaksiModel.findOne({
+      _id: id,
+      user: userId,
+    });
+    if (!oldTransaksi) {
+      return res.status(404).json({
+        message: "Transaksi tidak ditemukan atau Anda tidak memiliki akses",
+      });
+    }
+    const newNominal =
+      req.body.nominal !== undefined
+        ? Math.abs(Number(req.body.nominal))
+        : oldTransaksi.nominal;
+    if (oldTransaksi.targetTabungId && oldTransaksi.nominal !== newNominal) {
+      const selisih = newNominal - oldTransaksi.nominal;
+      const target = await TargetTabungModel.findById(
+        oldTransaksi.targetTabungId,
+      );
+      if (target) {
+        target.terkumpulNominal = Math.max(
+          0,
+          target.terkumpulNominal + selisih,
+        );
+        if (target.terkumpulNominal < target.targetNominal) {
+          target.status = "Aktif";
+        } else {
+          target.status = "Tercapai";
+        }
+        await target.save();
+      }
+    }
+    const updatedData = {
+      ...req.body,
+      ...(req.body.nominal !== undefined ? { nominal: Math.abs(Number(req.body.nominal)) } : {})
+    };
+    const updatedTransaksi = await TransaksiModel.findOneAndUpdate(
+      { _id: id, user: userId },
+      updatedData,
+      { new: true, runValidators: true },
+    );
+    return res
+      .status(200)
+      .json({ message: "Transaksi berhasil diupdate", data: updatedTransaksi });
+  } catch (error) {
+    return res
+      .status(400)
+      .json({ message: "Gagal update transaksi", error: String(error) });
+  }
+};
+export const deleteTransaksi = async (req: IReqUser, res: Response) => {
+  const session = await TransaksiModel.startSession();
+  session.startTransaction();
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const transaksi = await TransaksiModel.findOne({
+      _id: id,
+      user: userId,
+    }).session(session);
+    if (!transaksi) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Transaksi tidak ditemukan" });
+    }
+    if (transaksi.targetTabungId) {
+      const target = await TargetTabungModel.findById(
+        transaksi.targetTabungId,
+      ).session(session);
+      if (target) {
+        target.terkumpulNominal = Math.max(
+          0,
+          target.terkumpulNominal - transaksi.nominal,
+        );
+        if (target.terkumpulNominal < target.targetNominal) {
+          target.status = "Aktif";
+        }
+        await target.save({ session });
+      }
+    }
+    await TransaksiModel.findByIdAndDelete(id).session(session);
+    await session.commitTransaction();
+    session.endSession();
+    const profile = await ProfileModel.findOne({ user: userId });
+    return res.status(200).json({
+      message: "Transaksi berhasil dihapus",
+      saldoBaru: profile?.saldoSekarang,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    return res
+      .status(500)
+      .json({ message: "Gagal menghapus transaksi", error: String(error) });
+  }
+};

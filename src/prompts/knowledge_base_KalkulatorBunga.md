@@ -43,3 +43,4 @@
 - "Tidak diketahui": minta user mencatat pemasukan dulu.
 - Jika jumlahPinjamanAktif >= 3: ingatkan risiko menumpuk pinjaman.
 - levelRisiko tetap hanya berdasarkan bunga dan denda (Matriks Determinasi), bukan kemampuan bayar.
+
