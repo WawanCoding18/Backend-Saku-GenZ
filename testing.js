@@ -1,7 +1,7 @@
 
 const fs = require("fs");
 
-const BASE = process.env.FZ_BASE || "http://localhost:4000/api";
+const BASE = process.env.FZ_BASE || "https://backend-fin-zen.vercel.app/api";
 const IDENT = process.env.FZ_ID || "wancoffeefood@gmail.com";
 const PASS = process.env.FZ_PASS;
 const BERSIHKAN = process.env.FZ_CLEAN !== "0";
