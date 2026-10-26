@@ -36,7 +36,7 @@ export const streamGroq = async (
         { role: "system", content: FULL_SYSTEM_INSTRUCTION_OJK },
         {
           role: "user",
-          content: `Teks/hasil OCR yang diterima pengguna:\n"""${message}"""\n\nVariabel ojk_match_status dari backend: ${ojkMatchStatus}`,
+          content: `Teks/hasil yang diterima pengguna:\n"""${message}"""\n\nVariabel ojk_match_status dari backend: ${ojkMatchStatus}`,
         },
       ],
       response_format: { type: "json_object" },

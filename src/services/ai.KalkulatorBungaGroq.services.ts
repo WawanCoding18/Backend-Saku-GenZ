@@ -33,7 +33,7 @@ export const streamGroq = async (message: string, res: any): Promise<void> => {
         },
         {
           role: "user",
-          content: `Teks/hasil OCR yang diterima pengguna:\n"""${message}"""`,
+          content: `Data/Hasil Kalkulasi Pinjaman Pengguna:\n"""${message}"""`,
         },
       ],
       response_format: { type: "json_object" },

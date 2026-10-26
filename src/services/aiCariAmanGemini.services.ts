@@ -28,7 +28,7 @@ export const streamGemini = async (
 
   const responseStream = await aiText.models.generateContentStream({
     model: aiConfig.gemini.model, 
-    contents: `Teks/hasil OCR yang diterima pengguna:\n"""${message}"""\n\nVariabel ojk_match_status dari backend: ${ojkMatchStatus}`,
+    contents: `Teks/hasil yang diterima pengguna:\n"""${message}"""\n\nVariabel ojk_match_status dari backend: ${ojkMatchStatus}`,
     config: {
       systemInstruction: FULL_SYSTEM_INSTRUCTION_OJK,
       responseMimeType: "application/json",
