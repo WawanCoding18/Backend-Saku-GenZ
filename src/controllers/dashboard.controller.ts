@@ -86,7 +86,7 @@ export const getDashboard = async (req: IReqUser, res: Response) => {
         nama: user?.username,
         notifikasi: budgetWarnings,
         ringkasan: {
-          saldo: transaksiData.summary.saldo, // hapus jika saldo dibuang
+          saldo: transaksiData.summary.saldo,
           totalPemasukan: transaksiData.summary.totalPemasukan,
           totalPengeluaran: transaksiData.summary.totalPengeluaran,
         },
