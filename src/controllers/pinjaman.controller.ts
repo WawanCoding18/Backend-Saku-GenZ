@@ -15,8 +15,14 @@ const HARI_MS = 24 * 60 * 60 * 1000;
 const hitungSisaHari = (jt: Date) =>
   Math.ceil((new Date(jt).getTime() - Date.now()) / HARI_MS);
 const wajibPelunasan = (jt: Date) => hitungSisaHari(jt) <= 1; // H-1 dan lewat
-const hitungCicilanMinimum = (total: number, tenor: number) =>
-  tenor > 0 ? Math.ceil(total / tenor) : total;
+const hitungCicilanMinimum = (p: {
+  cicilanBulanan?: number;
+  totalYangHarusDibayar: number;
+  tenorCicilan: number;
+}) =>
+  p.cicilanBulanan && p.cicilanBulanan > 0
+    ? p.cicilanBulanan
+    : Math.ceil(p.totalYangHarusDibayar / (p.tenorCicilan || 1));
 
 //Tambah Data Pinjaman Baru 3
 export const postPinjaman = async (req: IReqUser, res: Response) => {
@@ -138,10 +144,7 @@ export const hitungDataPinjaman = async (userId: string) => {
       persenBunga: item.persenBunga,
       statusPinjaman: item.statusPinjaman,
       progress: Number(Math.max(0, Math.min(100, progress)).toFixed(1)),
-      cicilanMinimum: hitungCicilanMinimum(
-        item.totalPinjaman,
-        item.tenorCicilan,
-      ),
+      cicilanMinimum: hitungCicilanMinimum(item),
       sisaHari,
       mode:
         item.statusPinjaman === "Lunas"
@@ -239,11 +242,7 @@ export const putPinjaman = async (req: IReqUser, res: Response) => {
       });
     }
 
-    //Cicilan minimum = totalPinjaman / tenor
-    const minimum = hitungCicilanMinimum(
-      pinjaman.totalPinjaman,
-      pinjaman.tenorCicilan,
-    );
+    const minimum = hitungCicilanMinimum(pinjaman);
     const sisa = pinjaman.totalYangHarusDibayar;
     const bayarInput =
       Number(nominalBayar) > 0 ? Number(nominalBayar) : minimum;
