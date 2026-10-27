@@ -22,7 +22,7 @@ export const sendOTPEmail = async (
   otpCode: string
 ): Promise<void> => {
   await transporter.sendMail({
-    from: `"Saku Sehat App" <${EMAIL_FROM}>`,
+    from: `"Saku Gen Z App" <${EMAIL_FROM}>`,
     to: toEmail,
     subject: "Kode OTP Verifikasi Akun Kamu",
     html: `
