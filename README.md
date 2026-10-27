@@ -26,7 +26,7 @@ Saku Gen Z membantu pengguna mencatat pemasukan dan pengeluaran, merencanakan an
 | Lingkungan | URL |
 | --- | --- |
 | Local | `http://localhost:4000/api` |
-| Production | `https://backend-saku-genz.vercel.app//api` |
+| Production | `https://backend-saku-genz.vercel.app/api` |
 
 Swagger UI tersedia di `http://localhost:4000/api-docs` setelah server berjalan. Untuk endpoint yang memerlukan autentikasi, kirim access token dengan header:
 
@@ -248,7 +248,7 @@ Controller menghubungkan request dengan model dan service. Middleware autentikas
    EMAIL_FROM=alamat-gmail-anda@gmail.com
    EMAIL_APP_PASSWORD=app-password-gmail
    CLIENT_HOST=http://localhost:4001
-   MODAL_OCR_URL=isi-api-URL-OCR
+   MODAL_OCR_URL=isi-api-URL-PADDLEOCR
    ```
 
    `DATABASE_URL`, `SECRET`, `GEMINI_API_KEY`, dan `GROQ_API_KEY` dibutuhkan oleh konfigurasi aplikasi. Kredensial Gmail dibutuhkan agar pengiriman OTP berhasil. `CLIENT_HOST` memiliki nilai default `http://localhost:4001`.
