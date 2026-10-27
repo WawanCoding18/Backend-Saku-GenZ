@@ -1,10 +1,10 @@
-# FinZen Backend
+# Backend Saku Gen Z
 
-Backend API untuk FinZen, aplikasi pengelolaan keuangan pribadi. API ini menangani autentikasi pengguna dan data keuangan, serta menyediakan fitur analisis berbantuan AI.
+Backend API untuk Saku Gen Z, aplikasi pengelolaan keuangan pribadi. API ini menangani autentikasi pengguna dan data keuangan, serta menyediakan fitur analisis berbantuan AI.
 
 ## Deskripsi
 
-FinZen membantu pengguna mencatat pemasukan dan pengeluaran, merencanakan anggaran dan target tabungan, serta mengelola pinjaman. Backend menyediakan REST API berbasis Express dan menyimpan data di MongoDB. Beberapa fitur juga memanfaatkan layanan AI dan OCR untuk membantu analisis kesehatan finansial, perhitungan bunga, rekomendasi pinjaman, dan pemindaian catatan keuangan.
+Saku Gen Z membantu pengguna mencatat pemasukan dan pengeluaran, merencanakan anggaran dan target tabungan, serta mengelola pinjaman. Backend menyediakan REST API berbasis Express dan menyimpan data di MongoDB. Beberapa fitur juga memanfaatkan layanan AI dan OCR untuk membantu analisis kesehatan finansial, perhitungan bunga, rekomendasi pinjaman, dan pemindaian catatan keuangan.
 
 ## Key Features
 
@@ -26,7 +26,7 @@ FinZen membantu pengguna mencatat pemasukan dan pengeluaran, merencanakan anggar
 | Lingkungan | URL |
 | --- | --- |
 | Local | `http://localhost:4000/api` |
-| Production | `https://saku-sehat-backend.vercel.app/api` |
+| Production | `https://backend-saku-genz.vercel.app//api` |
 
 Swagger UI tersedia di `http://localhost:4000/api-docs` setelah server berjalan. Untuk endpoint yang memerlukan autentikasi, kirim access token dengan header:
 
@@ -48,8 +48,8 @@ Content-Type: application/json
   "fullName": "Rani Putri",
   "username": "raniputri",
   "email": "rani@example.com",
-  "password": "FinZen123",
-  "confirmPassword": "FinZen123"
+  "password": "SakuGenZ123",
+  "confirmPassword": "SakuGenZ123"
 }
 ```
 
@@ -88,7 +88,7 @@ Content-Type: application/json
 ```json
 {
   "identifier": "raniputri",
-  "password": "FinZen123"
+  "password": "SakuGenZ123"
 }
 ```
 
@@ -228,8 +228,8 @@ Controller menghubungkan request dengan model dan service. Middleware autentikas
 1. Clone repository dan masuk ke folder project:
 
    ```bash
-   git clone https://github.com/WawanCoding18/Backend-FinZen.git
-   cd Backend-FinZen
+   git clone https://github.com/WawanCoding18/Backend-Saku-GenZ.git
+   cd Backend-Saku-GenZ
    ```
 
 2. Install dependency:
@@ -241,15 +241,14 @@ Controller menghubungkan request dengan model dan service. Middleware autentikas
 3. Buat file `.env` di root project. Isi dengan konfigurasi lokal dan ganti semua nilai contoh:
 
    ```env
-   DATABASE_URL=mongodb://127.0.0.1:27017/finzen
+   DATABASE_URL=mongodb://127.0.0.1:27017/sakugenz
    SECRET=ganti-dengan-secret-jwt-yang-kuat
    GEMINI_API_KEY=isi-api-key-gemini
    GROQ_API_KEY=isi-api-key-groq
    EMAIL_FROM=alamat-gmail-anda@gmail.com
    EMAIL_APP_PASSWORD=app-password-gmail
    CLIENT_HOST=http://localhost:4001
-   # Opsional: jika tidak diisi, layanan OCR menggunakan URL default di source.
-   MODAL_OCR_URL=
+   MODAL_OCR_URL=isi-api-URL-OCR
    ```
 
    `DATABASE_URL`, `SECRET`, `GEMINI_API_KEY`, dan `GROQ_API_KEY` dibutuhkan oleh konfigurasi aplikasi. Kredensial Gmail dibutuhkan agar pengiriman OTP berhasil. `CLIENT_HOST` memiliki nilai default `http://localhost:4001`.
