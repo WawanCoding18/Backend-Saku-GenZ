@@ -161,27 +161,25 @@ export const setorTargetTabung = async (req: IReqUser, res: Response) => {
       return res.status(404).json({ message: "Target tabung tidak ditemukan" });
     }
 
-    target.terkumpulNominal += setor;
+    if ( target.status === "Tercapai" || target.terkumpulNominal >= target.targetNominal) {
+      return res.status(400).json({
+        message: "Target tabung sudah tercapai, tidak bisa menambah setoran lagi",
+      });
+    }
 
+    const sisa = target.targetNominal - target.terkumpulNominal;
+    const setorFinal = Math.min(setor, sisa);
+    target.terkumpulNominal += setorFinal;  
+ 
     if (target.terkumpulNominal >= target.targetNominal) {
       target.status = "Tercapai";
     }
+    
 
     await target.save();
-
-    // await TransaksiModel.create({
-    //   user: userId,
-    //   Catatan_Transaksi: `Setor Tabungan: ${target.namaTarget}`,
-    //   tipe: "pengeluaran",
-    //   kategori: "Tabungan",
-    //   Sumber_Dana: Sumber_Dana || "Tunai",
-    //   nominal: setor,
-    //   tanggal: new Date(),
-    //   targetTabungId: target._id,
-    // });
-
+    
     return res.status(200).json({
-      message: `Berhasil menyisihkan Rp${setor.toLocaleString("id-ID")} ke ${target.namaTarget}`,
+      message: `Berhasil menyisihkan Rp${setorFinal.toLocaleString("id-ID")} ke ${target.namaTarget}`,
       data: target,
     });
   } catch (error: any) {
