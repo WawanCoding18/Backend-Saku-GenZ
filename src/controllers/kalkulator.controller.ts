@@ -33,7 +33,6 @@ export const postKalkulatorBunga = async (req: IReqUser, res: Response) => {
   } = req.body;
 
   const pokok = parseAngka(jumlahPinjaman);
-  // const bunga = parseAngka(bungaPerBulan);
   const bunga = Number(String(bungaPerBulan).replace(",", "."));
   const tenor = parseAngka(tenorCicilan);
   const denda = dendaPerHari != undefined ? parseAngka(dendaPerHari) || 0 : 0;

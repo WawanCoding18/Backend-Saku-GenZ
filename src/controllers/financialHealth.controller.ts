@@ -166,6 +166,7 @@ const hitungTargetNabung = async (userId: string) => {
   let adaYangGagal = false;
 
   for (const target of listTarget) {
+    
     //Target yang sudah eksplisit Gagal langsung dianggap rasio 0
     if (target.status === "Gagal") {
       totalRasioPencapaian += 0;

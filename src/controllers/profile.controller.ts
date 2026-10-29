@@ -4,30 +4,6 @@ import { IReqUser } from "../middlewares/auth.Middleware";
 import UserModel  from "../models/user.model";
 
 
-// export const postProfile = async (req: IReqUser, res: Response) => {
-//   try {
-//     const userId = req.user?.id;
-//     console.log("User dari Token:", req.user);
-//     if (!userId) {
-//       return res.status(401).json({ message: "Unauthorized: User tidak teridentifikasi" });
-//     }
-
-//     const { fotoProfilUrl ,saldoSekarang, sumberPemasukan, onboardingCompleted } = req.body;
-
-//     const profile = await ProfileModel.findOneAndUpdate({
-//       user: userId,
-//       fotoProfilUrl, 
-//       saldoSekarang: Number(saldoSekarang),
-//       sumberPemasukan,
-//       onboardingCompleted
-//     });
-
-//     return res.status(201).json({ message: "Profile berhasil dibuat", data: profile });
-//   } catch (error) {
-//     return res.status(400).json({ message: "Gagal membuat Profile", error: String(error) });
-//   }
-// };
-
 export const postProfile = async (req: IReqUser, res: Response) => {
   try {
     const userId = req.user?.id;

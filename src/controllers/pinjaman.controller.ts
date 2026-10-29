@@ -61,13 +61,6 @@ export const postPinjaman = async (req: IReqUser, res: Response) => {
       cicilanInput > 0
         ? cicilanInput
         : Math.ceil(sisaTagihanAwal / (tenor || 1));
-    // const nominalTotal = Number(totalPinjaman);
-    // const tenor = Number(tenorCicilan);
-    // const cicilan = Number(cicilanBulanan);
-    // const sisaTagihanAwal =
-    //   totalYangHarusDibayar !== undefined
-    //     ? Number(totalYangHarusDibayar)
-    //     : nominalTotal;
 
     if (!nominalTotal || nominalTotal <= 0) {
       return res
